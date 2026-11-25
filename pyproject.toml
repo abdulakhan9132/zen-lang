@@ -26,6 +26,9 @@ classifiers = [
     "Topic :: Software Development :: Interpreters",
 ]
 
+[project.urls]
+Repository = "https://github.com/abdulakhan9132/zen-lang"
+
 [project.scripts]
 zen = "zen.cli:main"
 

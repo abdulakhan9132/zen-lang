@@ -19,7 +19,7 @@ pip install zen-lang
 Or install from source:
 
 ```bash
-git clone https://github.com/AbdullahKhanSuri/zen-lang.git
+git clone https://github.com/abdulakhan9132/zen-lang.git
 cd zen-lang
 pip install -e .
 ```
