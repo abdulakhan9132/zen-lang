@@ -47,6 +47,7 @@ fn perplexity(loss_val) {
 }
 
 fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none) {
+    let was_training = model.training
     model.eval()
     let seq = prompt_ids
     if type(seq) == "array" or type(seq) == "Tensor" {
@@ -58,6 +59,9 @@ fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none) 
     let out = []
     for tok in seq {
         push(out, int(tok))
+    }
+    if len(out) == 0 {
+        push(out, 0)
     }
 
     ag.no_grad(fn() {
@@ -74,7 +78,7 @@ fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none) 
                 next_tok = int(zn.argmax(last))
             } else {
                 let scaled = last / temperature
-                if top_k != none and top_k < scaled.size {
+                if top_k != none and top_k > 0 and top_k < scaled.size {
                     let sorted_vals = zn.sort(scaled)
                     let thresh = sorted_vals[scaled.size - top_k]
                     scaled = zn.where(scaled >= thresh, scaled, -1000000000.0)
@@ -100,6 +104,9 @@ fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none) 
         }
         return none
     })
+    if was_training {
+        model.train()
+    }
     return out
 }
 

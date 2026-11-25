@@ -1,41 +1,37 @@
+let QUICK = false // set true for ~20s quick run (100 steps)
 import zennum as zn
 import zennet as nn
 
 zn.seed(42)
-
-// Load and tokenize text corpus
 let raw = slice(read_file("examples/data/corpus.txt"), 0, 4000)
 let tok = nn.CharTokenizer(raw)
 let ids = tok.encode(raw)
 
-// Build GPT transformer model
-let cfg = {"vocab_size": tok.vocab_size, "n_layer": 2, "n_head": 2, "d_model": 16, "block_size": 16}
+let cfg = {"vocab_size": tok.vocab_size, "n_layer": 1, "n_head": 2, "d_model": 16, "block_size": 16}
 let model = nn.GPT(cfg)
-let opt = nn.AdamW(model.parameters(), 0.03)
+let opt = nn.AdamW(model.parameters(), 0.015)
 
-// Train GPT in a clean loop (no hand-written gradients!)
-let steps = 25
+let steps = 1000
+if QUICK { steps = 100 }
 let t0 = clock()
 let first_loss = 0.0
 let last_loss = 0.0
 for step in range(1, steps + 1) {
     let batch = nn.text_to_batches(ids, cfg["block_size"], 4)
     opt.zero_grad()
-    let logits = model(batch[0])
-    let loss = nn.cross_entropy(logits, batch[1])
+    let loss = nn.cross_entropy(model(batch[0]), batch[1])
     loss.backward()
     nn.clip_grad_norm(model.parameters(), 1.0)
     opt.step()
     last_loss = loss.item()
-    if step == 1 {
-        first_loss = last_loss
+    if step == 1 { first_loss = last_loss }
+    if step % 100 == 0 {
+        say "Step " + str(step) + "/" + str(steps) + " | loss: " + str(round(last_loss, 3))
     }
 }
 let ms_per_step = ((clock() - t0) * 1000.0) / steps
 
-// Generate text from prompt
-let prompt = slice(raw, 0, 5)
-let out_ids = nn.generate(model, tok.encode(prompt), 30, 0.8, 5)
+let out_ids = nn.generate(model, tok.encode(slice(raw, 0, 5)), 40, 0.8, 5)
 say "Start loss: " + str(round(first_loss, 3)) + " -> End loss: " + str(round(last_loss, 3))
 say "Speed: " + str(round(ms_per_step, 2)) + " ms/step (backend=" + zn.backend + ")"
 say "Sample: " + tok.decode(out_ids)

@@ -47,9 +47,8 @@ TEXT_DARK = colors.HexColor("#1F2937")
 TEXT_MUTED = colors.HexColor("#6B7280")
 
 
-def run_zen_example(rel_path: str, cmd: str = "run") -> tuple[str, str]:
-    """Run a real .zen file using the zen CLI and return (code_text, output_text)."""
-    path = GUIDE_DIR / rel_path
+def run_zen_path(path: Path, cmd: str = "run") -> tuple[str, str]:
+    """Run an arbitrary .zen file using the zen CLI and return (code_text, output_text)."""
     code = path.read_text(encoding="utf-8").strip()
     proc = subprocess.run(
         [sys.executable, "-m", "zen", cmd, str(path)],
@@ -58,9 +57,14 @@ def run_zen_example(rel_path: str, cmd: str = "run") -> tuple[str, str]:
         text=True,
     )
     if cmd == "run" and proc.returncode != 0:
-        raise RuntimeError(f"Guide example {rel_path} failed:\n{proc.stderr}\n{proc.stdout}")
+        raise RuntimeError(f"Example {path} failed:\n{proc.stderr}\n{proc.stdout}")
     output = (proc.stdout or "") + (proc.stderr or "")
     return code, output.strip()
+
+
+def run_zen_example(rel_path: str, cmd: str = "run") -> tuple[str, str]:
+    """Run a real .zen file using the zen CLI and return (code_text, output_text)."""
+    return run_zen_path(GUIDE_DIR / rel_path, cmd=cmd)
 
 
 class GuideDocTemplate(BaseDocTemplate):
@@ -560,9 +564,34 @@ def build_pdf() -> int:
     )
     add_chapter(
         "22.5 Building & Training a Mini GPT",
-        "Configure `nn.GPT`, train cleanly with `nn.fit`, inspect `nn.perplexity`, and generate text with `nn.generate`.",
+        "Configure `nn.GPT`, train cleanly with `nn.fit` or a custom loop, inspect `nn.perplexity`, and generate text with `nn.generate`.",
         "30_nn_gpt.zen",
+        page_break=False,
     )
+    story.append(Spacer(1, 6))
+    story.append(
+        Paragraph(
+            "<b>Full Corpus Recipe (`examples/gpt_in_40_lines.zen`):</b> Set `QUICK = true` at the top for a ~20-second 100-step preview, or `QUICK = false` (default) for 1000 steps (~3 minutes on CPU, loss &lt; 2.5).",
+            note_style,
+        )
+    )
+    gpt_recipe = ROOT / "examples" / "gpt_in_40_lines.zen"
+    gpt_code, gpt_full_out = run_zen_path(gpt_recipe)
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".zen", delete=False, encoding="utf-8") as tf:
+        tf.write(gpt_code.replace("let QUICK = false", "let QUICK = true", 1))
+        quick_path = Path(tf.name)
+    try:
+        _, gpt_quick_out = run_zen_path(quick_path)
+    finally:
+        quick_path.unlink(missing_ok=True)
+    story.append(_code_box("examples/gpt_in_40_lines.zen", gpt_code, bg=CODE_BG, border=PURPLE))
+    story.append(Spacer(1, 4))
+    story.append(_code_box("Output (QUICK = true, 100 steps)", gpt_quick_out, bg=OUT_BG, border=OUT_BORDER))
+    story.append(Spacer(1, 4))
+    story.append(_code_box("Output (QUICK = false, 1000 steps)", gpt_full_out, bg=OUT_BG, border=OUT_BORDER))
+    story.append(PageBreak())
 
     # 1-Page ZenNet Cheat Sheet
     story.append(Paragraph("22.6 ZenNet 1-Page Cheat Sheet", title_style))
