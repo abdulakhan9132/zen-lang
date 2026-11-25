@@ -1,0 +1,9 @@
+// Phase A example: Benchmark 256x256 matmul and inspect active runtime kernel backend.
+let t0 = clock()
+let a = randn([256, 256])
+let b = randn([256, 256])
+let t1 = clock()
+let c = a @ b
+let elapsed = round(clock() - t1, 4)
+
+say "256x256 matmul shape = " + str(shape(c)) + " | time = " + str(elapsed) + "s"

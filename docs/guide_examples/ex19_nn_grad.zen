@@ -1,0 +1,6 @@
+import zennet as nn
+
+let w = nn.tensor([3.0], true)
+let y = (w - 5.0) ** 2.0
+y.backward()
+say w.grad

@@ -1,0 +1,27 @@
+import zennum as zn
+import zennet.nn as nn
+
+zn.seed(42)
+
+let model = nn.Sequential([
+    nn.Linear(2, 8),
+    nn.Tanh(),
+    nn.Linear(8, 1),
+])
+
+let x = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
+let y_hat = model(x)
+let target = [[0.0], [1.0], [1.0], [0.0]]
+let loss = nn.mse(y_hat, target)
+loss.backward()
+
+say "Sequential params count: " + str(len(model.parameters()))
+say "MSE loss: " + str(loss.item())
+
+let gpt = nn.GPT({"vocab_size": 16, "n_layer": 1, "n_head": 2, "d_model": 8, "block_size": 8})
+let logits = gpt([[1, 2, 3, 4], [4, 3, 2, 1]])
+let ce = nn.cross_entropy(logits, [[2, 3, 4, 5], [3, 2, 1, 0]])
+ce.backward()
+say "GPT logits shape: " + str(logits.shape)
+say "GPT CE loss: " + str(ce.item())
+say "GPT params count: " + str(len(gpt.parameters()))

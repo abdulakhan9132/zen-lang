@@ -1,0 +1,4 @@
+import zennum as zn
+
+let a = zn.array([-3, 2, -1, 5, 8])
+say a[a > 0]

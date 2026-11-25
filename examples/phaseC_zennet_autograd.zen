@@ -1,0 +1,13 @@
+import zennum as zn
+import zennet.autograd as ag
+
+let x = ag.tensor([[1.0, 2.0], [3.0, -1.0]], true)
+let w = ag.tensor([[0.5, -0.25], [1.0, 0.5]], true)
+let y = ((x @ w).gelu() + 0.25).layernorm()
+let scalar = (y * y).sum()
+scalar.backward()
+
+say "loss = " + str(scalar.item())
+say "x.grad shape = " + str(x.grad.shape)
+say "w.grad ="
+say w.grad

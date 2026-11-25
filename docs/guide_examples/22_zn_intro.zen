@@ -1,0 +1,8 @@
+import zennum as zn
+
+let a = zn.array([[1, 2, 3], [4, 5, 6]])
+let z = zn.zeros([2, 2])
+let r = zn.arange(0, 10, 2)
+say "a = " + str(a)
+say "z = " + str(z)
+say "r = " + str(r)

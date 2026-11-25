@@ -1,0 +1,22 @@
+import zennum as zn
+import zennet as nn
+
+zn.seed(42)
+
+let x = zn.linspace(-2.0, 2.0, 20).reshape([20, 1])
+let y = x * 2.5 + 1.0
+
+let model = nn.Linear(1, 1)
+let opt = nn.SGD(model.parameters(), 0.1, 0.5)
+
+for step in range(80) {
+    opt.zero_grad()
+    let loss = nn.mse(model(x), y)
+    loss.backward()
+    opt.step()
+}
+
+let w = round(model.weight.item(), 3)
+let b = round(model.bias.item(), 3)
+say "Learned: y = " + str(w) + " * x + " + str(b)
+say "Final MSE: " + str(round(nn.mse(model(x), y).item(), 6))

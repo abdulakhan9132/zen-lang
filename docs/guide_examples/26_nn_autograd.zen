@@ -1,0 +1,8 @@
+import zennet as nn
+
+let x = nn.tensor([2.0, -3.0], true)
+let y = (x * x + 2.0 * x).sum()
+y.backward()
+
+say "y = " + str(y.item())
+say "dy/dx = " + str(x.grad)

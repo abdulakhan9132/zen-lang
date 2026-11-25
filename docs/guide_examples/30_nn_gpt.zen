@@ -1,0 +1,15 @@
+import zennum as zn
+import zennet as nn
+
+zn.seed(42)
+let text = "zen builds ai models fast! zen builds ai models! "
+let tok = nn.CharTokenizer(text)
+let ids = tok.encode(text)
+
+let cfg = {"vocab_size": tok.vocab_size, "n_layer": 1, "n_head": 2, "d_model": 8, "block_size": 8}
+let model = nn.GPT(cfg)
+let info = nn.fit(model, fn() { return nn.text_to_batches(ids, 8, 2) }, 25, none, nn.cross_entropy, 0.05)
+
+let out = nn.generate(model, tok.encode("zen "), 12, 0.8, 4)
+say "Loss: " + str(round(info["final_loss"], 3)) + " | Perplexity: " + str(round(nn.perplexity(info["final_loss"]), 2))
+say "Generated: " + tok.decode(out)

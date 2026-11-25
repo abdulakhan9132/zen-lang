@@ -1,0 +1,5 @@
+import zennum as zn
+
+let a = zn.array([[1, 2], [3, 4]])
+let b = zn.array([[5, 6], [7, 8]])
+say zn.concat([a, b], 0)

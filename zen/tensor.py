@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from array import array
 from functools import lru_cache
 from itertools import repeat
 import math
@@ -10,6 +11,7 @@ import random
 from typing import Any, Callable
 
 from zen.errors import ZenRuntimeError
+from zen import native_kernels
 
 
 @lru_cache(maxsize=512)
@@ -317,6 +319,9 @@ class ZenTensor:
 
     @staticmethod
     def _matmul_2d(a_data: list[float], a_off: int, m: int, k: int, b_data: list[float], b_off: int, n: int) -> list[float]:
+        if native_kernels.NATIVE_AVAILABLE and a_off == 0 and b_off == 0:
+            res_buf = native_kernels.matmul_2d_buf(array("d", a_data), 0, m, k, array("d", b_data), 0, n)
+            return list(res_buf)
         b_end = b_off + k * n
         b_cols = [b_data[b_off + j : b_end : n] for j in range(n)]
         out = [0.0] * (m * n)

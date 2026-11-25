@@ -1,0 +1,15 @@
+import zennum as zn
+import zennet as nn
+
+zn.seed(7)
+let net = nn.Sequential([
+    nn.Linear(2, 4),
+    nn.ReLU(),
+    nn.Linear(4, 1),
+])
+let x = [[1.0, 2.0], [-1.0, 0.5]]
+let pred = net(x)
+let loss = nn.mse(pred, [[1.0], [0.0]])
+loss.backward()
+say "Parameters: " + str(len(net.parameters()))
+say "MSE loss: " + str(round(loss.item(), 4))

@@ -1,0 +1,8 @@
+import zennum as zn
+import zennet as nn
+
+zn.seed(2)
+let logits = nn.tensor([[0.1, 2.5], [3.0, 0.2]], true)
+let ce = nn.cross_entropy(logits, [1, 0])
+ce.backward()
+say "loss = " + str(round(ce.item(), 4)) + ", acc = " + str(nn.accuracy(logits, [1, 0]))

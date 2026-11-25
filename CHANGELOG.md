@@ -2,6 +2,14 @@
 
 All notable changes to ZEN are documented in this file.
 
+## [0.2.0] - 2026-11-25
+
+### Added
+- **ZenNum (`import zennum as zn`):** NumPy-like N-dimensional arrays (`float64`, `float32`, `int64`, `bool`), multi-dimensional slicing (`a[1:3, :]`), boolean masking (`a[a > 0]`), broadcasting with clear shape-mismatch errors, reductions, math functions, and linear algebra (`@`, `matmul`, `dot`, `outer`, `norm`).
+- **ZenNet (`import zennet as nn`):** PyTorch-like deep learning framework written in `.zen` — reverse-mode `Tensor` autograd (`no_grad`, `detach`, slicing/scatter gradients), `Module` (`parameters()`, `train()`, `eval()`, `save()`, `load()`, `__call__`), `Linear`, `Embedding`, `LayerNorm`, `Dropout`, `Sequential`, causal `MultiHeadAttention`, `TransformerBlock`, `GPT`, losses (`mse`, `cross_entropy`, `binary_cross_entropy`), optimizers (`SGD`, `Adam`, `AdamW`, `clip_grad_norm`), LR schedulers (`StepLR`, `CosineAnnealingLR`, `WarmupLR`), `Dataset`/`DataLoader`, `CharTokenizer`/`BPETokenizer`, `Trainer`/`nn.fit`, `generate`, `accuracy`, and `perplexity`.
+- **Language Upgrades:** Default parameter values (`fn foo(x = 1)`), single class inheritance (`class Child(Parent)`), `__getitem__`/`__setitem__`/`__call__` dispatch, and unquoted package imports (`import zennum as zn`, `import zennet as nn`).
+- **Optional Native C Kernels & Packaging:** `zen/native/zen_kernels.c` with pure-Python flat-buffer fallback (`ZEN_NO_NATIVE=1`), optional `setup.py` C extension, `.github/workflows/wheels.yml` (`cibuildwheel`), updated `docs/ZENNUM.md`, `docs/ZENNET.md`, `README.md`, and expanded 46-page `docs/Learn-ZEN.pdf` with Part A (ZenNum) & Part B (ZenNet).
+
 ## [0.1.1] - 2026-11-25
 
 ### Added

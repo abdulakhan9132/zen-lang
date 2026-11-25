@@ -1,0 +1,309 @@
+// ZenNet Data Utilities, Dataset, DataLoader, and Tokenizers (pure ZEN)
+
+import zennum as zn
+
+class Dataset {
+    fn init(self, x, y) {
+        self.x = x
+        self.y = y
+        self._n = len(x)
+    }
+
+    fn size(self) {
+        return self._n
+    }
+
+    fn get(self, idx) {
+        return [self.x[idx], self.y[idx]]
+    }
+}
+
+fn _subset(container, idxs) {
+    let t = type(container)
+    if t == "array" {
+        let out = []
+        for idx in idxs {
+            push(out, container[idx].tolist())
+        }
+        return zn.array(out, container.dtype)
+    }
+    let out = []
+    for idx in idxs {
+        push(out, container[idx])
+    }
+    return out
+}
+
+fn train_val_split(x, y, val_ratio = 0.2, shuffle = true, seed_val = none) {
+    if seed_val != none {
+        zn.seed(seed_val)
+    }
+    let n = len(x)
+    let idxs = range(n)
+    if shuffle {
+        let i = n - 1
+        while i > 0 {
+            let j = randint(0, i)
+            let tmp = idxs[i]
+            idxs[i] = idxs[j]
+            idxs[j] = tmp
+            i = i - 1
+        }
+    }
+    let n_val = int(round(n * val_ratio))
+    if n_val < 1 and n > 1 {
+        n_val = 1
+    }
+    let split_pt = n - n_val
+    let tr_idx = idxs[0:split_pt]
+    let va_idx = idxs[split_pt:n]
+    let train_ds = Dataset(_subset(x, tr_idx), _subset(y, tr_idx))
+    let val_ds = Dataset(_subset(x, va_idx), _subset(y, va_idx))
+    return [train_ds, val_ds]
+}
+
+class DataLoader {
+    fn init(self, dataset, batch_size = 32, shuffle = true, seed_val = none) {
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.seed_val = seed_val
+    }
+
+    fn batches(self) {
+        if self.seed_val != none {
+            zn.seed(self.seed_val)
+        }
+        let n = self.dataset.size()
+        let idxs = range(n)
+        if self.shuffle {
+            let i = n - 1
+            while i > 0 {
+                let j = randint(0, i)
+                let tmp = idxs[i]
+                idxs[i] = idxs[j]
+                idxs[j] = tmp
+                i = i - 1
+            }
+        }
+        let out = []
+        let start = 0
+        while start < n {
+            let end = start + self.batch_size
+            if end > n {
+                end = n
+            }
+            let b_idxs = idxs[start:end]
+            let bx = _subset(self.dataset.x, b_idxs)
+            let by = _subset(self.dataset.y, b_idxs)
+            push(out, [bx, by])
+            start = end
+        }
+        return out
+    }
+}
+
+fn _sort_strings(arr) {
+    let n = len(arr)
+    let i = 0
+    while i < n {
+        let j = i + 1
+        while j < n {
+            if ord(arr[j]) < ord(arr[i]) {
+                let tmp = arr[i]
+                arr[i] = arr[j]
+                arr[j] = tmp
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return arr
+}
+
+class CharTokenizer {
+    fn init(self, text = "") {
+        self.stoi = {}
+        self.itos = []
+        self.vocab_size = 0
+        if len(text) > 0 {
+            self.fit(text)
+        }
+    }
+
+    fn fit(self, text) {
+        let seen = {}
+        let uniq = []
+        for ch in chars(text) {
+            if not contains(seen, ch) {
+                seen[ch] = true
+                push(uniq, ch)
+            }
+        }
+        self.itos = _sort_strings(uniq)
+        self.stoi = {}
+        let i = 0
+        while i < len(self.itos) {
+            self.stoi[self.itos[i]] = i
+            i = i + 1
+        }
+        self.vocab_size = len(self.itos)
+    }
+
+    fn encode(self, text) {
+        let out = []
+        for ch in chars(text) {
+            if contains(self.stoi, ch) {
+                push(out, self.stoi[ch])
+            }
+        }
+        return out
+    }
+
+    fn decode(self, ids) {
+        let seq = ids
+        if type(seq) == "array" or type(seq) == "Tensor" {
+            seq = seq.tolist()
+        }
+        let parts = []
+        for idx in seq {
+            let ii = int(idx)
+            if ii >= 0 and ii < len(self.itos) {
+                push(parts, self.itos[ii])
+            }
+        }
+        return join(parts, "")
+    }
+}
+
+class BPETokenizer {
+    fn init(self, vocab_size = 64) {
+        self.target_vocab_size = vocab_size
+        self.stoi = {}
+        self.itos = []
+        self.merges = []
+        self.vocab_size = 0
+    }
+
+    fn _merge_pair(self, ids, a, b, new_id) {
+        let out = []
+        let i = 0
+        let n = len(ids)
+        while i < n {
+            if i + 1 < n and ids[i] == a and ids[i + 1] == b {
+                push(out, new_id)
+                i = i + 2
+            } else {
+                push(out, ids[i])
+                i = i + 1
+            }
+        }
+        return out
+    }
+
+    fn fit(self, text) {
+        let seen = {}
+        let uniq = []
+        for ch in chars(text) {
+            if not contains(seen, ch) {
+                seen[ch] = true
+                push(uniq, ch)
+            }
+        }
+        self.itos = _sort_strings(uniq)
+        self.stoi = {}
+        let i = 0
+        while i < len(self.itos) {
+            self.stoi[self.itos[i]] = i
+            i = i + 1
+        }
+        let ids = []
+        for ch in chars(text) {
+            push(ids, self.stoi[ch])
+        }
+        self.merges = []
+        while len(self.itos) < self.target_vocab_size and len(ids) >= 2 {
+            let counts = {}
+            let pairs = {}
+            let best_key = ""
+            let best_cnt = 0
+            let k = 0
+            while k < len(ids) - 1 {
+                let a = ids[k]
+                let b = ids[k + 1]
+                let pk = str(a) + "," + str(b)
+                let cnt = 1
+                if contains(counts, pk) {
+                    cnt = counts[pk] + 1
+                }
+                counts[pk] = cnt
+                pairs[pk] = [a, b]
+                if cnt > best_cnt {
+                    best_cnt = cnt
+                    best_key = pk
+                }
+                k = k + 1
+            }
+            if best_cnt < 2 {
+                break
+            }
+            let bp = pairs[best_key]
+            let new_id = len(self.itos)
+            let tok_str = self.itos[bp[0]] + self.itos[bp[1]]
+            push(self.itos, tok_str)
+            self.stoi[tok_str] = new_id
+            push(self.merges, [bp[0], bp[1], new_id])
+            ids = self._merge_pair(ids, bp[0], bp[1], new_id)
+        }
+        self.vocab_size = len(self.itos)
+    }
+
+    fn encode(self, text) {
+        let ids = []
+        for ch in chars(text) {
+            if contains(self.stoi, ch) {
+                push(ids, self.stoi[ch])
+            }
+        }
+        for m in self.merges {
+            ids = self._merge_pair(ids, m[0], m[1], m[2])
+        }
+        return ids
+    }
+
+    fn decode(self, ids) {
+        let seq = ids
+        if type(seq) == "array" or type(seq) == "Tensor" {
+            seq = seq.tolist()
+        }
+        let parts = []
+        for idx in seq {
+            let ii = int(idx)
+            if ii >= 0 and ii < len(self.itos) {
+                push(parts, self.itos[ii])
+            }
+        }
+        return join(parts, "")
+    }
+}
+
+fn text_to_batches(ids, block_size, batch_size) {
+    let seq = ids
+    if type(seq) == "array" or type(seq) == "Tensor" {
+        seq = seq.tolist()
+    }
+    let max_start = len(seq) - block_size - 1
+    let X = []
+    let Y = []
+    let b = 0
+    while b < batch_size {
+        let s = 0
+        if max_start > 0 {
+            s = randint(0, max_start)
+        }
+        push(X, seq[s : s + block_size])
+        push(Y, seq[s + 1 : s + block_size + 1])
+        b = b + 1
+    }
+    return [zn.array(X, "int64"), zn.array(Y, "int64")]
+}

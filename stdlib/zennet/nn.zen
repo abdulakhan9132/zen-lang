@@ -1,0 +1,411 @@
+// ZenNet Neural Network Layers, Losses, and GPT Architecture (pure ZEN)
+
+import zennum as zn
+import zennet.autograd as ag
+
+fn xavier(shape) {
+    let fan_in = shape[0]
+    let fan_out = shape[0]
+    if len(shape) >= 2 {
+        fan_out = shape[1]
+    }
+    let std = sqrt(2.0 / (fan_in + fan_out))
+    return ag.Tensor(zn.randn(shape, "float64") * std, true)
+}
+
+fn normal(shape, mean = 0.0, std = 0.02) {
+    return ag.Tensor(zn.randn(shape, "float64") * std + mean, true)
+}
+
+fn _is_primitive_type(tname) {
+    return (
+        tname == "int"
+        or tname == "float"
+        or tname == "string"
+        or tname == "bool"
+        or tname == "none"
+        or tname == "list"
+        or tname == "map"
+        or tname == "array"
+        or tname == "function"
+        or tname == "builtin"
+        or tname == "module"
+    )
+}
+
+class Module {
+    fn init(self) {
+        self.training = true
+        self._is_module = true
+    }
+
+    fn __call__(self, x) {
+        return self.forward(x)
+    }
+
+    fn forward(self, x) {
+        return x
+    }
+
+    fn parameters(self) {
+        let params = []
+        let seen = {}
+        fn _collect(obj) {
+            if obj == none {
+                return
+            }
+            let t = type(obj)
+            if t == "Tensor" {
+                if obj.requires_grad and not contains(seen, obj._id) {
+                    seen[obj._id] = true
+                    push(params, obj)
+                }
+                return
+            }
+            if t == "list" {
+                for item in obj {
+                    _collect(item)
+                }
+                return
+            }
+            if t == "map" {
+                for k in obj {
+                    _collect(obj[k])
+                }
+                return
+            }
+            if _is_primitive_type(t) {
+                return
+            }
+            let f = fields(obj)
+            if contains(f, "_is_module") {
+                for k in f {
+                    if k != "training" and k != "_is_module" {
+                        _collect(f[k])
+                    }
+                }
+            }
+        }
+        _collect(self)
+        return params
+    }
+
+    fn zero_grad(self) {
+        for p in self.parameters() {
+            p.zero_grad()
+        }
+    }
+
+    fn train(self, mode = true) {
+        fn _set_mode(obj) {
+            if obj == none {
+                return
+            }
+            let t = type(obj)
+            if t == "list" {
+                for item in obj {
+                    _set_mode(item)
+                }
+                return
+            }
+            if _is_primitive_type(t) or t == "Tensor" {
+                return
+            }
+            let f = fields(obj)
+            if contains(f, "_is_module") {
+                obj.training = mode
+                for k in f {
+                    if k != "training" and k != "_is_module" {
+                        _set_mode(f[k])
+                    }
+                }
+            }
+        }
+        _set_mode(self)
+    }
+
+    fn eval(self) {
+        self.train(false)
+    }
+
+    fn save(self, path) {
+        let data = []
+        for p in self.parameters() {
+            push(data, p.data.tolist())
+        }
+        save_weights(path, {"weights": data})
+    }
+
+    fn load(self, path) {
+        let ckpt = load_weights(path)
+        let weights = ckpt["weights"]
+        let params = self.parameters()
+        let i = 0
+        while i < len(params) and i < len(weights) {
+            params[i].set_data(zn.array(weights[i], "float64"))
+            i = i + 1
+        }
+    }
+}
+
+class Linear(Module) {
+    fn init(self, in_features, out_features, use_bias = true) {
+        Module.init(self)
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = xavier([in_features, out_features])
+        self.bias = none
+        if use_bias {
+            self.bias = ag.zeros([out_features], true)
+        }
+    }
+
+    fn forward(self, x) {
+        let tx = ag._as_tensor(x)
+        let y = tx @ self.weight
+        if self.bias != none {
+            y = y + self.bias
+        }
+        return y
+    }
+}
+
+class Embedding(Module) {
+    fn init(self, num_embeddings, embedding_dim) {
+        Module.init(self)
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.weight = normal([num_embeddings, embedding_dim], 0.0, 0.02)
+    }
+
+    fn forward(self, idx) {
+        return self.weight.gather(idx)
+    }
+}
+
+class LayerNorm(Module) {
+    fn init(self, normalized_shape, eps = 1e-5) {
+        Module.init(self)
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+        self.gamma = ag.ones([normalized_shape], true)
+        self.beta = ag.zeros([normalized_shape], true)
+    }
+
+    fn forward(self, x) {
+        return ag._as_tensor(x).layernorm(self.gamma, self.beta, self.eps)
+    }
+}
+
+class Dropout(Module) {
+    fn init(self, p = 0.1) {
+        Module.init(self)
+        self.p = p
+    }
+
+    fn forward(self, x) {
+        return ag._as_tensor(x).dropout(self.p, self.training)
+    }
+}
+
+class ReLU(Module) {
+    fn init(self) { Module.init(self) }
+    fn forward(self, x) { return ag._as_tensor(x).relu() }
+}
+
+class GELU(Module) {
+    fn init(self) { Module.init(self) }
+    fn forward(self, x) { return ag._as_tensor(x).gelu() }
+}
+
+class Tanh(Module) {
+    fn init(self) { Module.init(self) }
+    fn forward(self, x) { return ag._as_tensor(x).tanh() }
+}
+
+class Sigmoid(Module) {
+    fn init(self) { Module.init(self) }
+    fn forward(self, x) { return ag._as_tensor(x).sigmoid() }
+}
+
+class Sequential(Module) {
+    fn init(self, layers = none) {
+        Module.init(self)
+        if layers == none {
+            self.layers = []
+        } else {
+            self.layers = layers
+        }
+    }
+
+    fn add(self, layer) {
+        push(self.layers, layer)
+    }
+
+    fn forward(self, x) {
+        let h = ag._as_tensor(x)
+        for layer in self.layers {
+            let t = type(layer)
+            if t == "fn" or t == "vmclosure" or t == "function" or t == "builtin" {
+                h = layer(h)
+            } else {
+                h = layer.forward(h)
+            }
+        }
+        return h
+    }
+}
+
+fn _causal_mask(seq_len) {
+    let m = []
+    let r = 0
+    while r < seq_len {
+        let row = []
+        let c = 0
+        while c < seq_len {
+            push(row, c > r)
+            c = c + 1
+        }
+        push(m, row)
+        r = r + 1
+    }
+    return zn.array(m, "bool").reshape([1, 1, seq_len, seq_len])
+}
+
+class MultiHeadAttention(Module) {
+    fn init(self, d_model, n_head, block_size = 128, dropout_p = 0.0) {
+        Module.init(self)
+        self.d_model = d_model
+        self.n_head = n_head
+        self.head_dim = int(d_model / n_head)
+        self.block_size = block_size
+        self.q_proj = Linear(d_model, d_model)
+        self.k_proj = Linear(d_model, d_model)
+        self.v_proj = Linear(d_model, d_model)
+        self.out_proj = Linear(d_model, d_model)
+        self.attn_drop = Dropout(dropout_p)
+        self.resid_drop = Dropout(dropout_p)
+        self._scale = 1.0 / sqrt(self.head_dim)
+    }
+
+    fn forward(self, x, causal = true) {
+        let tx = ag._as_tensor(x)
+        let B = tx.shape[0]
+        let T = tx.shape[1]
+        let C = tx.shape[2]
+        let H = self.n_head
+        let D = self.head_dim
+
+        let q = self.q_proj.forward(tx).reshape([B, T, H, D]).transpose([0, 2, 1, 3])
+        let k = self.k_proj.forward(tx).reshape([B, T, H, D]).transpose([0, 2, 1, 3])
+        let v = self.v_proj.forward(tx).reshape([B, T, H, D]).transpose([0, 2, 1, 3])
+
+        let scores = (q @ k.transpose([0, 1, 3, 2])) * self._scale
+        if causal {
+            scores = scores.masked_fill(_causal_mask(T), -1000000000.0)
+        }
+        let probs = self.attn_drop.forward(scores.softmax(-1))
+        let y = (probs @ v).transpose([0, 2, 1, 3]).reshape([B, T, C])
+        return self.resid_drop.forward(self.out_proj.forward(y))
+    }
+}
+
+class TransformerBlock(Module) {
+    fn init(self, d_model, n_head, block_size = 128, dropout_p = 0.0, mlp_mult = 4) {
+        Module.init(self)
+        self.ln1 = LayerNorm(d_model)
+        self.attn = MultiHeadAttention(d_model, n_head, block_size, dropout_p)
+        self.ln2 = LayerNorm(d_model)
+        self.fc1 = Linear(d_model, d_model * mlp_mult)
+        self.fc2 = Linear(d_model * mlp_mult, d_model)
+        self.drop = Dropout(dropout_p)
+    }
+
+    fn forward(self, x) {
+        let h = ag._as_tensor(x)
+        h = h + self.attn.forward(self.ln1.forward(h))
+        let mlp = self.fc2.forward(self.fc1.forward(self.ln2.forward(h)).gelu())
+        return h + self.drop.forward(mlp)
+    }
+}
+
+class GPT(Module) {
+    fn init(self, config) {
+        Module.init(self)
+        self.vocab_size = config["vocab_size"]
+        self.n_layer = config["n_layer"]
+        self.n_head = config["n_head"]
+        self.d_model = config["d_model"]
+        self.block_size = config["block_size"]
+        let drop_p = 0.0
+        if contains(config, "dropout") {
+            drop_p = config["dropout"]
+        }
+
+        self.tok_emb = Embedding(self.vocab_size, self.d_model)
+        self.pos_emb = Embedding(self.block_size, self.d_model)
+        self.drop = Dropout(drop_p)
+        self.blocks = []
+        let i = 0
+        while i < self.n_layer {
+            push(self.blocks, TransformerBlock(self.d_model, self.n_head, self.block_size, drop_p))
+            i = i + 1
+        }
+        self.ln_f = LayerNorm(self.d_model)
+        self.lm_head = Linear(self.d_model, self.vocab_size, false)
+    }
+
+    fn forward(self, idx) {
+        let idx_arr = zn.array(idx, "int64")
+        if idx_arr.ndim == 1 {
+            idx_arr = idx_arr.reshape([1, idx_arr.size])
+        }
+        let T = idx_arr.shape[1]
+        let tok = self.tok_emb.forward(idx_arr)
+        let pos = self.pos_emb.forward(zn.arange(T))
+        let x = self.drop.forward(tok + pos)
+        for blk in self.blocks {
+            x = blk.forward(x)
+        }
+        x = self.ln_f.forward(x)
+        return self.lm_head.forward(x)
+    }
+}
+
+// --- Losses ---
+
+fn mse(pred, target) {
+    let p = ag._as_tensor(pred)
+    let diff = p - target
+    return (diff * diff).mean()
+}
+
+fn binary_cross_entropy(pred, target, eps = 1e-7) {
+    let p = ag._as_tensor(pred).clip(eps, 1.0 - eps)
+    let y = ag._as_tensor(target)
+    return (-(y * p.log() + (1.0 - y) * (1.0 - p).log())).mean()
+}
+
+fn cross_entropy(logits, targets) {
+    let l = ag._as_tensor(logits)
+    let C = l.shape[len(l.shape) - 1]
+    let N = int(l.size / C)
+    let l2 = l.reshape([N, C])
+    let t_arr: any = targets
+    if type(t_arr) == "Tensor" {
+        t_arr = t_arr.data
+    } else {
+        t_arr = zn.array(t_arr, "int64")
+    }
+    let t_flat = t_arr.flatten().tolist()
+    let oh = zn.zeros([N, C], "float64")
+    let i = 0
+    while i < N {
+        let cls_id = int(t_flat[i])
+        oh[i, cls_id] = 1.0
+        i = i + 1
+    }
+    let lsm = l2.log_softmax(-1)
+    let oh_t = ag.Tensor(oh, false)
+    return (-(lsm * oh_t)).sum() * (1.0 / N)
+}

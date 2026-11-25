@@ -54,7 +54,7 @@ def test_spec_and_grammar_cover_core_constructs() -> None:
 
 
 def test_zen_spec_constants_are_consistent() -> None:
-    assert VERSION == "0.1.1"
+    assert VERSION == "0.2.0"
     # Multi-character operators must precede single-character prefixes for maximal munch.
     assert OPERATORS.index("**") < OPERATORS.index("*")
     assert OPERATORS.index("==") < OPERATORS.index("=")

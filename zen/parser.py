@@ -144,37 +144,57 @@ class Parser:
         self._consume_optional_semicolon()
         return ast.AssertStmt(kw.line, kw.column, cond, message)
 
-    def _parse_params(self) -> tuple[list[str], list[str | None]]:
+    def _parse_params(self) -> tuple[list[str], list[str | None], list[ast.Node | None]]:
         self._expect(TokenType.LPAREN, "Expected '(' before parameters")
         params: list[str] = []
         param_types: list[str | None] = []
-        if not self._check(TokenType.RPAREN):
-            p_name = self._expect(TokenType.IDENT, "Expected parameter name").value
+        defaults: list[ast.Node | None] = []
+        seen_default = False
+
+        def _one_param() -> None:
+            nonlocal seen_default
+            p_tok = self._expect(TokenType.IDENT, "Expected parameter name")
             p_type = self._parse_type_name() if self._match(TokenType.COLON) else None
-            params.append(p_name)
+            p_def: ast.Node | None = None
+            if self._match(TokenType.EQ):
+                p_def = self._parse_expression()
+                seen_default = True
+            elif seen_default:
+                raise ZenSyntaxError("Non-default parameter follows default parameter", p_tok.line, p_tok.column)
+            params.append(p_tok.value)
             param_types.append(p_type)
+            defaults.append(p_def)
+
+        if not self._check(TokenType.RPAREN):
+            _one_param()
             while self._match(TokenType.COMMA):
                 if self._check(TokenType.RPAREN):
                     break
-                p_name = self._expect(TokenType.IDENT, "Expected parameter name").value
-                p_type = self._parse_type_name() if self._match(TokenType.COLON) else None
-                params.append(p_name)
-                param_types.append(p_type)
+                _one_param()
         self._expect(TokenType.RPAREN, "Expected ')' after parameters")
-        return params, param_types
+        return params, param_types, defaults
 
     def _parse_fn_decl(self) -> ast.FnDecl:
         kw = self._advance()
         name = self._expect(TokenType.IDENT, "Expected function name after 'fn'")
-        params, param_types = self._parse_params()
+        params, param_types, defaults = self._parse_params()
         ret_type = self._parse_type_name() if self._match(TokenType.ARROW) else None
         body = self._parse_block()
         p_types_opt = param_types if any(t is not None for t in param_types) else None
-        return ast.FnDecl(kw.line, kw.column, name.value, params, body, p_types_opt, ret_type)
+        defs_opt = defaults if any(d is not None for d in defaults) else None
+        return ast.FnDecl(kw.line, kw.column, name.value, params, body, p_types_opt, ret_type, defs_opt)
 
     def _parse_class_decl(self) -> ast.ClassDecl:
         kw = self._advance()
         name = self._expect(TokenType.IDENT, "Expected class name after 'class'")
+        superclass: ast.Node | None = None
+        if self._match(TokenType.LPAREN):
+            base_tok = self._expect(TokenType.IDENT, "Expected base class name")
+            superclass = ast.VarExpr(base_tok.line, base_tok.column, base_tok.value)
+            while dot := self._match(TokenType.DOT):
+                mem = self._expect(TokenType.IDENT, "Expected base class name after '.'")
+                superclass = ast.MemberExpr(dot.line, dot.column, superclass, mem.value)
+            self._expect(TokenType.RPAREN, "Expected ')' after base class")
         self._expect(TokenType.LBRACE, "Expected '{' after class name")
         methods: list[ast.FnDecl] = []
         while not self._check(TokenType.RBRACE) and not self._is_at_end():
@@ -183,17 +203,30 @@ class Parser:
                 raise ZenSyntaxError("Expected 'fn' method declaration inside class", bad.line, bad.column)
             methods.append(self._parse_fn_decl())
         self._expect(TokenType.RBRACE, "Expected '}' after class body")
-        return ast.ClassDecl(kw.line, kw.column, name.value, methods)
+        return ast.ClassDecl(kw.line, kw.column, name.value, methods, superclass)
 
     def _parse_import(self) -> ast.ImportStmt:
         kw = self._advance()
-        path_tok = self._expect(TokenType.STRING, "Expected file path string after 'import'")
-        alias: str | None = None
+        if self._check(TokenType.STRING):
+            path_tok = self._advance()
+            alias: str | None = None
+            if self._match(TokenType.AS):
+                alias_tok = self._expect(TokenType.IDENT, "Expected alias identifier after 'as'")
+                alias = alias_tok.value
+            self._consume_optional_semicolon()
+            return ast.ImportStmt(kw.line, kw.column, path_tok.value, alias)
+
+        first = self._expect(TokenType.IDENT, "Expected module name or path string after 'import'")
+        parts = [first.value]
+        while self._match(TokenType.DOT):
+            part = self._expect(TokenType.IDENT, "Expected module name after '.'")
+            parts.append(part.value)
         if self._match(TokenType.AS):
-            alias_tok = self._expect(TokenType.IDENT, "Expected alias identifier after 'as'")
-            alias = alias_tok.value
+            alias = self._expect(TokenType.IDENT, "Expected alias identifier after 'as'").value
+        else:
+            alias = parts[-1]
         self._consume_optional_semicolon()
-        return ast.ImportStmt(kw.line, kw.column, path_tok.value, alias)
+        return ast.ImportStmt(kw.line, kw.column, "pkg:" + ".".join(parts), alias)
 
     def _parse_if(self) -> ast.IfStmt:
         kw = self._advance()
@@ -312,7 +345,8 @@ class Parser:
     def _parse_postfix(self) -> ast.Node:
         expr = self._parse_primary()
         while True:
-            if lparen := self._match(TokenType.LPAREN):
+            if self._check(TokenType.LPAREN) and self._peek().line == self._previous().line:
+                lparen = self._advance()
                 args: list[ast.Node] = []
                 if not self._check(TokenType.RPAREN):
                     args.append(self._parse_expression())
@@ -322,9 +356,15 @@ class Parser:
                         args.append(self._parse_expression())
                 self._expect(TokenType.RPAREN, "Expected ')' after arguments")
                 expr = ast.CallExpr(lparen.line, lparen.column, expr, args)
-            elif lbrack := self._match(TokenType.LBRACKET):
-                index = self._parse_expression()
+            elif self._check(TokenType.LBRACKET) and self._peek().line == self._previous().line:
+                lbrack = self._advance()
+                items = [self._parse_subscript_item()]
+                while self._match(TokenType.COMMA):
+                    if self._check(TokenType.RBRACKET):
+                        break
+                    items.append(self._parse_subscript_item())
                 self._expect(TokenType.RBRACKET, "Expected ']' after index")
+                index: ast.Node = items[0] if len(items) == 1 else ast.TupleExpr(lbrack.line, lbrack.column, items)
                 expr = ast.IndexExpr(lbrack.line, lbrack.column, expr, index)
             elif dot := self._match(TokenType.DOT):
                 member = self._expect(TokenType.IDENT, "Expected member name after '.'")
@@ -343,11 +383,12 @@ class Parser:
             return ast.VarExpr(tok.line, tok.column, tok.value)
         if tok.type == TokenType.FN:
             kw = self._advance()
-            params, param_types = self._parse_params()
+            params, param_types, defaults = self._parse_params()
             ret_type = self._parse_type_name() if self._match(TokenType.ARROW) else None
             body = self._parse_block()
             p_types_opt = param_types if any(t is not None for t in param_types) else None
-            return ast.FnExpr(kw.line, kw.column, params, body, p_types_opt, ret_type)
+            defs_opt = defaults if any(d is not None for d in defaults) else None
+            return ast.FnExpr(kw.line, kw.column, params, body, p_types_opt, ret_type, defs_opt)
         if tok.type == TokenType.LPAREN:
             self._advance()
             expr = self._parse_expression()
@@ -358,6 +399,23 @@ class Parser:
         if tok.type == TokenType.LBRACE:
             return self._parse_map()
         raise ZenSyntaxError(f"Expected expression, got {tok.type.name} ({tok.value!r})", tok.line, tok.column)
+
+    def _parse_subscript_item(self) -> ast.Node:
+        tok = self._peek()
+        if self._check(TokenType.COLON):
+            start: ast.Node | None = None
+        else:
+            start = self._parse_expression()
+        if self._match(TokenType.COLON):
+            stop: ast.Node | None = None
+            if not (self._check(TokenType.RBRACKET) or self._check(TokenType.COMMA) or self._check(TokenType.COLON)):
+                stop = self._parse_expression()
+            step: ast.Node | None = None
+            if self._match(TokenType.COLON):
+                if not (self._check(TokenType.RBRACKET) or self._check(TokenType.COMMA)):
+                    step = self._parse_expression()
+            return ast.SliceExpr(tok.line, tok.column, start, stop, step)
+        return start
 
     def _parse_list(self) -> ast.ListExpr:
         lbrack = self._advance()

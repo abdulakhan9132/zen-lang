@@ -1,0 +1,5 @@
+import zennum as zn
+
+let v = zn.array([3.0, 4.0])
+say "norm = " + str(zn.norm(v))
+say "sum = " + str(zn.sum(v))

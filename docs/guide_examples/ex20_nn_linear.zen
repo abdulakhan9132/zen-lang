@@ -1,0 +1,7 @@
+import zennum as zn
+import zennet as nn
+
+zn.seed(1)
+let l = nn.Linear(4, 2)
+let out = l([[1.0, 0.0, -1.0, 2.0]])
+say out.shape

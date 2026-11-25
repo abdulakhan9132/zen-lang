@@ -29,6 +29,9 @@ NONE = ZType("none")
 LIST = ZType("list")
 MAP = ZType("map")
 TENSOR = ZType("tensor")
+ARRAY = ZType("array")
+SLICE = ZType("slice")
+TUPLE = ZType("tuple")
 
 _PRIMITIVE_TYPES: dict[str, ZType] = {
     "any": ANY,
@@ -42,6 +45,7 @@ _PRIMITIVE_TYPES: dict[str, ZType] = {
     "list": LIST,
     "map": MAP,
     "tensor": TENSOR,
+    "array": ARRAY,
 }
 
 
@@ -58,6 +62,27 @@ class FnType(ZType):
 class ClassType(ZType):
     methods: dict[str, FnType] = field(default_factory=dict)
     fields: dict[str, ZType] = field(default_factory=dict)
+    parent: "ClassType | None" = None
+
+    def find_method(self, name: str) -> FnType | None:
+        cur: ClassType | None = self
+        seen: set[int] = set()
+        while cur is not None and id(cur) not in seen:
+            seen.add(id(cur))
+            if name in cur.methods:
+                return cur.methods[name]
+            cur = cur.parent
+        return None
+
+    def find_field(self, name: str) -> ZType | None:
+        cur: ClassType | None = self
+        seen: set[int] = set()
+        while cur is not None and id(cur) not in seen:
+            seen.add(id(cur))
+            if name in cur.fields:
+                return cur.fields[name]
+            cur = cur.parent
+        return None
 
 
 @dataclass
@@ -190,6 +215,8 @@ def _builtin_bindings() -> dict[str, _Binding]:
         "save_weights": fn(2, 2, NONE),
         "load_weights": fn(1, 1, ANY),
         "clock": fn(0, 0, FLOAT),
+        "fields": fn(1, 1, MAP),
+        "_zennum_rt": _Binding(ANY, is_const=True),
     }
 
 
@@ -198,6 +225,7 @@ _DUNDER_MAP: dict[str, tuple[str, str]] = {
     "-": ("__sub__", "__rsub__"),
     "*": ("__mul__", "__rmul__"),
     "/": ("__truediv__", "__rtruediv__"),
+    "%": ("__mod__", "__rmod__"),
     "**": ("__pow__", "__rpow__"),
     "@": ("__matmul__", "__rmatmul__"),
 }
@@ -209,8 +237,8 @@ class TypeChecker:
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = (base_dir or Path.cwd()).resolve()
         self.global_scope = _Scope()
-        for name, binding in _builtin_bindings().items():
-            self.global_scope.bindings[name] = binding
+        self._initial_builtins = _builtin_bindings()
+        self.global_scope.bindings.update(self._initial_builtins)
         self._module_cache: dict[Path, ModuleType] = {}
 
     def check_program(self, program: ast.Program, source: str | None = None) -> None:
@@ -356,6 +384,16 @@ class TypeChecker:
             else:
                 klass = ClassType(node.name)
                 scope.define(node.name, klass, is_const=False)
+            if node.superclass is not None:
+                super_t = self._check_expr(node.superclass, scope)
+                if isinstance(super_t, ClassType):
+                    klass.parent = super_t
+                elif super_t is not ANY:
+                    raise ZenTypeError(
+                        f"Superclass must be a class, got '{super_t}'",
+                        node.superclass.line,
+                        node.superclass.column,
+                    )
             inst_type = InstanceType(node.name, klass)
 
             for m in node.methods:
@@ -387,7 +425,7 @@ class TypeChecker:
 
         if isinstance(node, ast.ForStmt):
             iter_type = self._check_expr(node.iterable, scope)
-            if iter_type not in (ANY, LIST, MAP, STRING):
+            if iter_type not in (ANY, LIST, MAP, STRING, ARRAY):
                 raise ZenTypeError(
                     f"Cannot iterate over value of type '{iter_type}'",
                     node.iterable.line,
@@ -446,10 +484,16 @@ class TypeChecker:
                 p_types.append(ANY)
             else:
                 p_types.append(self._resolve_type_name(pt, scope, node))
+        if node.defaults:
+            for d in node.defaults:
+                if d is not None:
+                    self._check_expr(d, scope)
         ret_t = self._resolve_type_name(node.return_type, scope, node) if node.return_type is not None else ANY
-        arity = len(node.params) - 1 if is_method and node.params else len(node.params)
+        max_arity = len(node.params) - 1 if is_method and node.params else len(node.params)
+        num_defaults = sum(1 for d in (node.defaults or []) if d is not None)
+        min_arity = max(0, max_arity - num_defaults)
         fn_name = node.name if isinstance(node, ast.FnDecl) else "<lambda>"
-        return FnType(fn_name, tuple(p_types), ret_t, arity, arity, is_method=is_method)
+        return FnType(fn_name, tuple(p_types), ret_t, min_arity, max_arity, is_method=is_method)
 
     def _check_fn_body(
         self,
@@ -524,9 +568,10 @@ class TypeChecker:
             exports = {
                 k: b
                 for k, b in mod_checker.global_scope.bindings.items()
-                if k not in _builtin_bindings()
+                if b is not mod_checker._initial_builtins.get(k)
             }
-            mod = ModuleType(target.stem, exports)
+            mod_name = target.parent.name if target.stem == "__init__" else target.stem
+            mod = ModuleType(mod_name, exports)
             self._module_cache[target] = mod
 
         if node.alias:
@@ -578,7 +623,7 @@ class TypeChecker:
             if node.op == "not":
                 return BOOL
             if node.op == "-":
-                if op_t in (ANY, INT, FLOAT, TENSOR):
+                if op_t in (ANY, INT, FLOAT, TENSOR, ARRAY):
                     return op_t
                 if isinstance(op_t, InstanceType) and "__neg__" in op_t.klass.methods:
                     return op_t.klass.methods["__neg__"].ret
@@ -593,14 +638,35 @@ class TypeChecker:
             arg_types = [self._check_expr(a, scope) for a in node.args]
             return self._check_call(callee_t, arg_types, node)
 
+        if isinstance(node, ast.SliceExpr):
+            if node.start is not None:
+                self._check_expr(node.start, scope)
+            if node.stop is not None:
+                self._check_expr(node.stop, scope)
+            if node.step is not None:
+                self._check_expr(node.step, scope)
+            return SLICE
+
+        if isinstance(node, ast.TupleExpr):
+            for el in node.elements:
+                self._check_expr(el, scope)
+            return TUPLE
+
         if isinstance(node, ast.IndexExpr):
             target_t = self._check_expr(node.target, scope)
             idx_t = self._check_expr(node.index, scope)
-            if target_t in (LIST, STRING, TENSOR) and idx_t not in (ANY, INT):
-                raise ZenTypeError(f"Index must be 'int', got '{idx_t}'", node.index.line, node.index.column)
-            if target_t not in (ANY, LIST, MAP, STRING, TENSOR):
+            if isinstance(target_t, InstanceType):
+                get_m = target_t.klass.find_method("__getitem__")
+                if get_m is not None:
+                    return get_m.ret
                 raise ZenTypeError(f"Cannot index into type '{target_t}'", node.line, node.column)
-            return STRING if target_t == STRING else ANY
+            if target_t in (LIST, STRING) and idx_t not in (ANY, INT, SLICE):
+                raise ZenTypeError(f"Index must be 'int', got '{idx_t}'", node.index.line, node.index.column)
+            if target_t == TENSOR and idx_t not in (ANY, INT):
+                raise ZenTypeError(f"Index must be 'int', got '{idx_t}'", node.index.line, node.index.column)
+            if target_t not in (ANY, LIST, MAP, STRING, TENSOR, ARRAY):
+                raise ZenTypeError(f"Cannot index into type '{target_t}'", node.line, node.column)
+            return STRING if target_t == STRING else (LIST if target_t == LIST and idx_t == SLICE else (ARRAY if target_t == ARRAY else ANY))
 
         if isinstance(node, ast.MemberExpr):
             obj_t = self._check_expr(node.target, scope)
@@ -614,16 +680,63 @@ class TypeChecker:
                         node.column,
                     )
                 return obj_t.exports[node.member].ztype
+            if isinstance(obj_t, ClassType):
+                m = obj_t.find_method(node.member)
+                if m is not None:
+                    extra = 1 if m.is_method and m.params else 0
+                    return FnType(
+                        m.name,
+                        m.params,
+                        m.ret,
+                        m.min_args + extra,
+                        None if m.max_args is None else m.max_args + extra,
+                        is_method=False,
+                    )
+                raise ZenTypeError(
+                    f"Class '{obj_t.name}' has no method '{node.member}'",
+                    node.line,
+                    node.column,
+                )
             if isinstance(obj_t, InstanceType):
-                if node.member in obj_t.klass.methods:
-                    return obj_t.klass.methods[node.member]
-                if node.member in obj_t.klass.fields:
-                    return obj_t.klass.fields[node.member]
+                m = obj_t.klass.find_method(node.member)
+                if m is not None:
+                    return m
+                f = obj_t.klass.find_field(node.member)
+                if f is not None:
+                    return f
                 raise ZenTypeError(
                     f"'{obj_t.klass.name}' instance has no field or method '{node.member}'",
                     node.line,
                     node.column,
                 )
+            if obj_t == ARRAY:
+                array_members: dict[str, ZType] = {
+                    "shape": LIST,
+                    "ndim": INT,
+                    "size": INT,
+                    "dtype": STRING,
+                    "T": ARRAY,
+                    "reshape": FnType("reshape", None, ARRAY, 1, None),
+                    "transpose": FnType("transpose", None, ARRAY, 0, None),
+                    "sum": FnType("sum", None, ANY, 0, 2),
+                    "mean": FnType("mean", None, ANY, 0, 2),
+                    "std": FnType("std", None, ANY, 0, 2),
+                    "var": FnType("var", None, ANY, 0, 2),
+                    "min": FnType("min", None, ANY, 0, 2),
+                    "max": FnType("max", None, ANY, 0, 2),
+                    "argmax": FnType("argmax", None, ANY, 0, 1),
+                    "argmin": FnType("argmin", None, ANY, 0, 1),
+                    "tolist": FnType("tolist", None, ANY, 0, 0),
+                    "copy": FnType("copy", None, ARRAY, 0, 0),
+                    "astype": FnType("astype", None, ARRAY, 1, 1),
+                    "clip": FnType("clip", None, ARRAY, 2, 2),
+                    "flatten": FnType("flatten", None, ARRAY, 0, 0),
+                    "squeeze": FnType("squeeze", None, ARRAY, 0, 1),
+                    "unsqueeze": FnType("unsqueeze", None, ARRAY, 1, 1),
+                }
+                if node.member not in array_members:
+                    raise ZenTypeError(f"Array has no member '{node.member}'", node.line, node.column)
+                return array_members[node.member]
             if obj_t == TENSOR:
                 tensor_members: dict[str, ZType] = {
                     "shape": LIST,
@@ -653,7 +766,7 @@ class TypeChecker:
         if callee_t is ANY:
             return ANY
         if isinstance(callee_t, ClassType):
-            init_m = callee_t.methods.get("init")
+            init_m = callee_t.find_method("init")
             if init_m is not None:
                 self._check_fn_args(init_m, arg_types, node)
             elif arg_types:
@@ -666,6 +779,12 @@ class TypeChecker:
         if isinstance(callee_t, FnType):
             self._check_fn_args(callee_t, arg_types, node)
             return callee_t.ret
+        if isinstance(callee_t, InstanceType):
+            call_m = callee_t.klass.find_method("__call__")
+            if call_m is not None:
+                self._check_fn_args(call_m, arg_types, node)
+                return call_m.ret
+            raise ZenTypeError(f"Value of type '{callee_t}' is not callable", node.line, node.column)
         raise ZenTypeError(f"Value of type '{callee_t}' is not callable", node.line, node.column)
 
     def _check_fn_args(self, fn_t: FnType, arg_types: list[ZType], node: ast.CallExpr) -> None:
@@ -724,11 +843,15 @@ class TypeChecker:
                 return STRING
             if lt == LIST and rt == LIST:
                 return LIST
+            if (lt == ARRAY and (rt == ARRAY or _is_numeric(rt))) or (rt == ARRAY and _is_numeric(lt)):
+                return ARRAY
             if (lt == TENSOR and (rt == TENSOR or _is_numeric(rt))) or (rt == TENSOR and _is_numeric(lt)):
                 return TENSOR
             raise ZenTypeError(f"Unsupported '+' between '{lt}' and '{rt}'", node.line, node.column)
 
         if op in ("-", "*", "/", "%", "**"):
+            if (lt == ARRAY and (rt == ARRAY or _is_numeric(rt))) or (rt == ARRAY and _is_numeric(lt)):
+                return ARRAY
             if op in ("-", "*", "/") and (
                 (lt == TENSOR and (rt == TENSOR or _is_numeric(rt)))
                 or (rt == TENSOR and _is_numeric(lt))
@@ -745,6 +868,8 @@ class TypeChecker:
             )
 
         if op in ("<", "<=", ">", ">="):
+            if (lt == ARRAY and (rt == ARRAY or _is_numeric(rt))) or (rt == ARRAY and _is_numeric(lt)):
+                return ARRAY
             if (_is_numeric(lt) and _is_numeric(rt)) or (lt == STRING and rt == STRING):
                 return BOOL
             raise ZenTypeError(
@@ -754,6 +879,8 @@ class TypeChecker:
             )
 
         if op == "@":
+            if lt == ARRAY and rt == ARRAY:
+                return ARRAY
             if lt == TENSOR and rt == TENSOR:
                 return ANY
             raise ZenTypeError(

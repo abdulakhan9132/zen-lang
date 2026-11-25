@@ -60,12 +60,14 @@ class FnDecl(Node):
     body: Block
     param_types: list[str | None] | None = None
     return_type: str | None = None
+    defaults: list[Node | None] | None = None
 
 
 @dataclass(frozen=True)
 class ClassDecl(Node):
     name: str
     methods: list[FnDecl]
+    superclass: Node | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +143,7 @@ class FnExpr(Node):
     body: Block
     param_types: list[str | None] | None = None
     return_type: str | None = None
+    defaults: list[Node | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +169,18 @@ class CallExpr(Node):
 class IndexExpr(Node):
     target: Node
     index: Node
+
+
+@dataclass(frozen=True)
+class SliceExpr(Node):
+    start: Node | None
+    stop: Node | None
+    step: Node | None
+
+
+@dataclass(frozen=True)
+class TupleExpr(Node):
+    elements: list[Node]
 
 
 @dataclass(frozen=True)

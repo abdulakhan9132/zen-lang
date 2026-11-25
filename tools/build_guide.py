@@ -90,7 +90,7 @@ class GuideDocTemplate(BaseDocTemplate):
         canvas.line(0.75 * inch, h - 0.6 * inch, w - 0.75 * inch, h - 0.6 * inch)
         canvas.setFont("Helvetica", 8.5)
         canvas.setFillColor(TEXT_MUTED)
-        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.1.1)")
+        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.2.0)")
         canvas.drawRightString(w - 0.75 * inch, 0.45 * inch, f"Page {doc.page}")
         canvas.restoreState()
 
@@ -193,7 +193,7 @@ def build_pdf() -> int:
     story.append(Spacer(1, 0.55 * inch))
     story.append(
         Paragraph(
-            "Version 0.1.1<br/>By Abdullah Khan Suri",
+            "Version 0.2.0<br/>By Abdullah Khan Suri",
             ParagraphStyle("CoverMeta", fontName="Helvetica-Bold", fontSize=12, leading=18, textColor=PURPLE, alignment=TA_CENTER),
         )
     )
@@ -445,20 +445,233 @@ def build_pdf() -> int:
         story.append(Spacer(1, 6))
     story.append(PageBreak())
 
-    # Chapter 21: Current Limitations and Roadmap
-    story.append(Paragraph("21. Current limitations and roadmap", title_style))
-    story.append(Paragraph("What ZEN can do today, and what is still planned for future versions.", one_liner_style))
+    # --- Part A: ZenNum (Numbers and Arrays) ---
+    story.append(Paragraph("21. Part A — ZenNum: Numbers and Arrays", title_style))
+    story.append(
+        Paragraph(
+            "ZenNum gives ZEN fast N-dimensional arrays (`import zennum as zn`) with slicing, broadcasting, and matrix math.",
+            one_liner_style,
+        )
+    )
+    add_chapter(
+        "21.1 Creating Arrays with ZenNum",
+        "Create multi-dimensional grids of numbers with `array`, `zeros`, `ones`, `arange`, `linspace`, `eye`, and `randn`.",
+        "22_zn_intro.zen",
+    )
+    add_chapter(
+        "21.2 Shapes, Reshaping & Transpose",
+        "Inspect dimensions with `.shape`, `.ndim`, `.size`, and rearrange data without loops via `.reshape` and `.T`.",
+        "23_zn_shapes.zen",
+    )
+    add_chapter(
+        "21.3 Multi-Dimensional Slicing & Boolean Masks",
+        "Pick sub-matrices with `a[rows, cols]` slices or filter elements matching a condition like `a[a > 7]`.",
+        "24_zn_slicing.zen",
+    )
+    add_chapter(
+        "21.4 Broadcasting, Reductions & Matrix Multiply",
+        "Smaller arrays expand to match larger ones automatically, and `sum`, `mean`, `@` work across entire arrays.",
+        "25_zn_broadcasting.zen",
+    )
+
+    # 1-Page ZenNum Cheat Sheet
+    story.append(Paragraph("21.5 ZenNum 1-Page Cheat Sheet", title_style))
+    story.append(Paragraph("All core ZenNum functions in one place (`import zennum as zn`).", one_liner_style))
+    zn_sheet = [
+        ["Category", "Functions / Syntax"],
+        ["Import", "import zennum as zn   (or: import zennum)"],
+        ["Create", "zn.array(data, dtype), zn.zeros(shape), zn.ones(shape), zn.full(shape, val), zn.arange(a, b, s), zn.linspace(a, b, n), zn.eye(n), zn.rand(shape), zn.randn(shape), zn.seed(s)"],
+        ["Inspect", "a.shape, a.ndim, a.size, a.dtype, a.T, a.tolist(), a.copy(), a.astype(dtype)"],
+        ["Slice / Mask", "a[1:3, :], a[:, -1], a[a > 0], a[0, 0] = 9, zn.where(cond, x, y), zn.clip(a, lo, hi)"],
+        ["Shape", "zn.reshape(a, s), zn.transpose(a, axes), zn.flatten(a), zn.squeeze(a), zn.unsqueeze(a, ax), zn.concat(list, ax), zn.stack(list, ax), zn.split(a, n, ax)"],
+        ["Math & Stats", "zn.abs, zn.sqrt, zn.exp, zn.log, zn.sin, zn.cos, zn.tanh, zn.pow, zn.sum, zn.mean, zn.std, zn.var, zn.min, zn.max, zn.argmax, zn.argmin, zn.sort, zn.cumsum"],
+        ["Linear Algebra", "a @ b, zn.matmul(a, b), zn.dot(a, b), zn.outer(a, b), zn.norm(a)"],
+    ]
+    zn_tbl = Table(zn_sheet, colWidths=[1.35 * inch, 5.55 * inch])
+    zn_tbl.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PURPLE),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 1), (1, -1), "Courier"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PURPLE_SOFT]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ])
+    )
+    story.append(zn_tbl)
+    story.append(PageBreak())
+
+    # 8 ZenNum Exercises + Verified Answers
+    zn_exercises = [
+        ("ZN Ex 1", "Create a 3x3 array filled with 5s using `zn.ones`.", "ex11_zn_ones.zen"),
+        ("ZN Ex 2", "Create 5 evenly spaced floats from 0 to 10 with `zn.linspace`.", "ex12_zn_linspace.zen"),
+        ("ZN Ex 3", "Reshape `1..9` into `[3, 3]` and slice the bottom-right 2x2 block.", "ex13_zn_slice.zen"),
+        ("ZN Ex 4", "Keep only positive numbers from `[-3, 2, -1, 5, 8]` using a boolean mask.", "ex14_zn_mask.zen"),
+        ("ZN Ex 5", "Compute L2 `norm` and `sum` of `[3.0, 4.0]`.", "ex15_zn_norm.zen"),
+        ("ZN Ex 6", "Find the maximum value and its index in `[10, 50, 20, 40]`.", "ex16_zn_argmax.zen"),
+        ("ZN Ex 7", "Stack two 2x2 matrices vertically with `zn.concat`.", "ex17_zn_concat.zen"),
+        ("ZN Ex 8", "Multiply `[[1, 2], [3, 4]]` by `zn.eye(2)` using `@`.", "ex18_zn_matmul.zen"),
+    ]
+    story.append(Paragraph("21.6 8 ZenNum Exercises & Answers", title_style))
+    for i, (etitle, prompt, fname) in enumerate(zn_exercises):
+        if i == 4:
+            story.append(PageBreak())
+        code, out = run_zen_example(fname)
+        story.append(Paragraph(f"<b>{escape(etitle)}:</b> {escape(prompt)} ({escape(fname)})", note_style))
+        story.append(_code_box(f"docs/guide_examples/{fname}", code, bg=CODE_BG, border=PURPLE))
+        story.append(Spacer(1, 2))
+        story.append(_code_box("Output", out, bg=OUT_BG, border=OUT_BORDER))
+        story.append(Spacer(1, 4))
+    story.append(PageBreak())
+
+    # --- Part B: ZenNet (Build AI) ---
+    story.append(Paragraph("22. Part B — ZenNet: Build AI", title_style))
+    story.append(
+        Paragraph(
+            "ZenNet (`import zennet as nn`) gives you PyTorch-style autograd, layers, optimizers, datasets, tokenizers, and GPT written purely in `.zen`.",
+            one_liner_style,
+        )
+    )
+    add_chapter(
+        "22.1 Autograd Tensors & Gradients",
+        "Set `requires_grad = true`, do math cleanly, call `.backward()`, and read `.grad` (skip tracking with `nn.no_grad`).",
+        "26_nn_autograd.zen",
+    )
+    add_chapter(
+        "22.2 Neural Network Layers & Losses",
+        "Stack `Linear`, `ReLU`, `GELU`, `LayerNorm`, or `Dropout` inside `nn.Sequential`, then score predictions with `mse` or `cross_entropy`.",
+        "27_nn_layers.zen",
+    )
+    add_chapter(
+        "22.3 Training XOR in 15 Lines",
+        "Combine `nn.Sequential`, `nn.Adam`, and `nn.mse` in a short training loop until XOR predictions approach `[0, 1, 1, 0]`.",
+        "28_nn_xor.zen",
+    )
+    add_chapter(
+        "22.4 Datasets, DataLoaders & Tokenizers",
+        "Split data with `train_val_split`, shuffle mini-batches via `DataLoader`, and convert text to IDs using `CharTokenizer` or `BPETokenizer`.",
+        "29_nn_data.zen",
+    )
+    add_chapter(
+        "22.5 Building & Training a Mini GPT",
+        "Configure `nn.GPT`, train cleanly with `nn.fit`, inspect `nn.perplexity`, and generate text with `nn.generate`.",
+        "30_nn_gpt.zen",
+    )
+
+    # 1-Page ZenNet Cheat Sheet
+    story.append(Paragraph("22.6 ZenNet 1-Page Cheat Sheet", title_style))
+    story.append(Paragraph("Every building block in `import zennet as nn`.", one_liner_style))
+    nn_sheet = [
+        ["Category", "API"],
+        ["Autograd", "nn.tensor(d, req_grad), t.backward(), t.grad, t.zero_grad(), t.detach(), t.item(), nn.no_grad(fn)"],
+        ["Ops & Act.", "+ - * / ** @, reshape, transpose, sum, mean, relu, gelu, sigmoid, tanh, softmax, log_softmax, masked_fill, gather, layernorm"],
+        ["Layers", "nn.Module, nn.Linear, nn.Embedding, nn.LayerNorm, nn.Dropout, nn.ReLU, nn.GELU, nn.Tanh, nn.Sigmoid, nn.Sequential, nn.MultiHeadAttention, nn.TransformerBlock, nn.GPT"],
+        ["Losses", "nn.mse(pred, y), nn.cross_entropy(logits, targets), nn.binary_cross_entropy(p, y)"],
+        ["Optimizers", "nn.SGD(params, lr, momentum), nn.Adam(params, lr), nn.AdamW(params, lr, weight_decay), nn.clip_grad_norm(params, max)"],
+        ["Schedulers", "nn.StepLR(opt, step, gamma), nn.CosineAnnealingLR(opt, total, min_lr), nn.WarmupLR(opt, steps)"],
+        ["Data & Tok.", "nn.Dataset, nn.DataLoader, nn.train_val_split, nn.CharTokenizer, nn.BPETokenizer, nn.text_to_batches"],
+        ["Train & Eval", "nn.Trainer, nn.fit, nn.generate(model, prompt, n, temp, top_k), nn.accuracy, nn.perplexity, model.save / load"],
+    ]
+    nn_tbl = Table(nn_sheet, colWidths=[1.25 * inch, 5.65 * inch])
+    nn_tbl.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PURPLE),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 1), (1, -1), "Courier"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PURPLE_SOFT]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ])
+    )
+    story.append(nn_tbl)
+    story.append(PageBreak())
+
+    # 8 ZenNet Exercises + Verified Answers
+    nn_exercises = [
+        ("NN Ex 1", "Find `d/dw` of `(w - 5)^2` at `w = 3`.", "ex19_nn_grad.zen"),
+        ("NN Ex 2", "Pass `[1, 0, -1, 2]` through `nn.Linear(4, 2)` and check `.shape`.", "ex20_nn_linear.zen"),
+        ("NN Ex 3", "Build a `Sequential([Linear(2, 3), GELU(), Linear(3, 1)])` and count parameters.", "ex21_nn_seq.zen"),
+        ("NN Ex 4", "Compute `cross_entropy` and `accuracy` for 2 logit rows.", "ex22_nn_loss.zen"),
+        ("NN Ex 5", "Use `SGD` to minimize `(w - 1)^2` starting from `w = 4`.", "ex23_nn_sgd.zen"),
+        ("NN Ex 6", "Run a calculation inside `nn.no_grad` and confirm `requires_grad` is `false`.", "ex24_nn_nograd.zen"),
+        ("NN Ex 7", "Train `BPETokenizer` on a repeated phrase, encode it, and decode back.", "ex25_nn_bpe.zen"),
+        ("NN Ex 8", "Create a tiny `nn.GPT` and generate 4 tokens greedily (`temp = 0.0`).", "ex26_nn_gpt.zen"),
+    ]
+    story.append(Paragraph("22.7 8 ZenNet Exercises & Answers", title_style))
+    for i, (etitle, prompt, fname) in enumerate(nn_exercises):
+        if i == 4:
+            story.append(PageBreak())
+        code, out = run_zen_example(fname)
+        story.append(Paragraph(f"<b>{escape(etitle)}:</b> {escape(prompt)} ({escape(fname)})", note_style))
+        story.append(_code_box(f"docs/guide_examples/{fname}", code, bg=CODE_BG, border=PURPLE))
+        story.append(Spacer(1, 2))
+        story.append(_code_box("Output", out, bg=OUT_BG, border=OUT_BORDER))
+        story.append(Spacer(1, 4))
+    story.append(PageBreak())
+
+    # Comparison page: ZenNum and ZenNet vs NumPy and PyTorch
+    story.append(Paragraph("23. ZenNum and ZenNet vs NumPy and PyTorch", title_style))
+    story.append(Paragraph("If you already know Python's AI stack, here is how ZEN compares side-by-side.", one_liner_style))
+    cmp_rows = [
+        ["Concept", "Python (NumPy / PyTorch)", "ZEN (ZenNum / ZenNet)"],
+        ["Import arrays", "import numpy as np", "import zennum as zn"],
+        ["Import deep learning", "import torch.nn as nn", "import zennet as nn"],
+        ["Create / reshape array", "np.arange(6).reshape(2, 3)", "zn.arange(6).reshape([2, 3])"],
+        ["2D slice & mask", "a[1:3, :], a[a > 0]", "a[1:3, :], a[a > 0]"],
+        ["Matrix multiply", "A @ B", "A @ B"],
+        ["Autograd tensor", "torch.tensor(x, requires_grad=True)", "nn.tensor(x, true)"],
+        ["Sequential MLP", "nn.Sequential(nn.Linear(2, 8), nn.Tanh())", "nn.Sequential([nn.Linear(2, 8), nn.Tanh()])"],
+        ["Custom Model", "class Net(nn.Module): def forward(self, x)", "class Net(nn.Module) { fn forward(self, x) }"],
+        ["Optimizer + step", "opt = torch.optim.AdamW(m.parameters())", "let opt = nn.AdamW(m.parameters(), 0.01)"],
+        ["One-line training", "custom loop or Lightning Trainer", "nn.fit(model, data, steps)"],
+        ["Runtime / GPU", "C / CUDA", "Pure ZEN + C/Python CPU fallback (no GPU yet)"],
+    ]
+    cmp_tbl = Table(cmp_rows, colWidths=[1.6 * inch, 2.55 * inch, 2.75 * inch])
+    cmp_tbl.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), PURPLE),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 1), (-1, -1), "Courier"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PURPLE_SOFT]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ])
+    )
+    story.append(cmp_tbl)
+    story.append(PageBreak())
+
+    # Chapter 24: Current Limitations and Roadmap
+    story.append(Paragraph("24. Current limitations and roadmap", title_style))
+    story.append(Paragraph("What ZEN v0.2.0 can do today, and what is still planned for future versions.", one_liner_style))
     limits = [
-        ("Slow pure-Python tensors:", "Matrix math uses pure Python lists without C extensions, SIMD, or GPU support (~51 ms/step on a tiny d_model=16 GPT)."),
-        ("Tiny GPT only:", "AutoCharGPT trains on small text files for low-RAM laptops and learns character/syllable patterns rather than fluent prose."),
-        ("No native compiler yet:", "Programs run on a Python bytecode VM (`zen run`). There is no LLVM, C codegen, package manager, or LSP server yet."),
+        ("CPU-only execution:", "Pure-Python flat buffers run when no C compiler is present (~0.63s for 256x256 matmul; ~355 ms/step on a 2-layer d_model=16 GPT), with optional native C kernels (`zen/native/zen_kernels.c`). No GPU/CUDA yet."),
+        ("Tiny GPT scale:", "Models and examples target low-RAM laptops using character/small-BPE corpora rather than large foundation models."),
+        ("No native compiler yet:", "Programs run on the Python bytecode VM (`zen run`). LLVM/AOT compilation, external package manager, and LSP remain future work."),
     ]
     for head, body in limits:
         story.append(Paragraph(f"<b>{escape(head)}</b> {escape(body)}", note_style))
     story.append(Spacer(1, 8))
     story.append(Paragraph("Roadmap", subhead_style))
-    story.append(Paragraph("v0.1.x: Language, bytecode VM, type checker, developer tools, pure-Python tensors, .zen autograd/MLP/GPT, and this guide.", note_style))
-    story.append(Paragraph("Future: Faster native tensor kernels, IR/native compilation, and richer standard library modules.", note_style))
+    story.append(Paragraph("v0.2.0: Bytecode VM, static type checker, VS Code extension, ZenNum N-D arrays, ZenNet autograd/layers/GPT/optimizers/Trainer, and Learn-ZEN guide.", note_style))
+    story.append(Paragraph("Future: Prebuilt multi-platform native C wheels, GPU/SIMD backends, native compiler, and LSP.", note_style))
 
     PDF_OUT.parent.mkdir(parents=True, exist_ok=True)
     doc = GuideDocTemplate(

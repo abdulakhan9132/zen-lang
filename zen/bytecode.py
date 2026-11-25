@@ -30,6 +30,8 @@ class Op(IntEnum):
     # Containers
     BUILD_LIST = auto()      # arg: count
     BUILD_MAP = auto()       # arg: count
+    BUILD_TUPLE = auto()     # arg: count
+    BUILD_SLICE = auto()
     GET_INDEX = auto()
     SET_INDEX = auto()
     GET_MEMBER = auto()      # arg: name
@@ -74,6 +76,7 @@ class CodeObject:
     cell_slots: tuple[bool, ...] = ()
     upvalues: tuple[tuple[bool, int], ...] = ()
     is_module: bool = False
+    num_defaults: int = 0
     ops: tuple[int, ...] = ()
     args: tuple[Any, ...] = ()
     lines: tuple[int, ...] = ()

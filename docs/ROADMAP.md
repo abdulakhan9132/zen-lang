@@ -77,3 +77,31 @@
 - Promoted `assert` to a first-class language keyword/statement (`assert cond, msg`) across lexer, parser, AST, compiler, VM, interpreter, and type checker.
 - Implemented `zen/formatter.py` (`zen fmt file.zen` / `--check`), `zen check file.zen`, and `zen test` in `zen/cli.py`.
 - Added 5 self-testing `.zen` suites in `tests_zen/` plus `examples/phase15_tools.zen` and `tests/test_phase15.py`.
+
+## Phase A: Native speed — **DONE**
+- Added C99 kernels in `zen/native/zen_kernels.c` (blocked matmul, elementwise ops, reductions, softmax, layer norm, embedding lookup) and `ctypes` loader + `array('d')` flat-buffer pure-Python fallback in `zen/native_kernels.py`.
+- Checked for `gcc`/`clang`/`cl` on this machine (none installed), so runtime runs pure-Python flat-buffer fallback (`256x256` matmul benchmark in `examples/phaseA_native_bench.zen`, tests in `tests/test_phaseA.py`).
+
+### Phase B — ZenNum Arrays & Language Upgrades (Done)
+- Built `zen/zennum_core.py` + `stdlib/zennum/__init__.zen` (`import zennum as zn`, `import zennum`) supporting creation helpers, multi-dim slicing, boolean indexing, broadcasting, math, reductions, and linalg (`tests/test_phaseB_zennum.py`, `examples/zennum_basics.zen`).
+
+### Phase C — ZenNet Autograd Engine (Done)
+- Built `stdlib/zennet/autograd.zen` purely in ZEN (`Tensor`, iterative topological `backward()`, `no_grad()`, `detach()`, and vectorized forward/backward ops verified against numerical gradients in `tests/test_phaseC_zennet_autograd.py`, `examples/phaseC_zennet_autograd.zen`).
+
+### Phase D — ZenNet Layers, Losses & GPT (Done)
+- Built `stdlib/zennet/nn.zen` (`Module`, `Linear`, `Embedding`, `LayerNorm`, `Dropout`, `Sequential`, `MultiHeadAttention`, `TransformerBlock`, `GPT`, `mse`, `cross_entropy`, `binary_cross_entropy`) with save/load (`tests/test_phaseD_zennet_nn.py`, `examples/phaseD_layers_gpt.zen`).
+
+### Phase E — ZenNet Optimizers & LR Schedulers (Done)
+- Built `stdlib/zennet/optim.zen` (`SGD`, `Adam`, `AdamW`, `clip_grad_norm`, `StepLR`, `CosineAnnealingLR`, `WarmupLR`) verified in `tests/test_phaseE_optim.py` and `examples/phaseE_optim.zen`.
+
+### Phase F — ZenNet Data, Tokenizers & Trainer (Done)
+- Built `stdlib/zennet/data.zen`, `stdlib/zennet/train.zen`, and `stdlib/zennet/__init__.zen` (`Dataset`, `DataLoader`, `train_val_split`, `CharTokenizer`, `BPETokenizer`, `text_to_batches`, `Trainer`, `fit`, `generate`, `accuracy`, `perplexity`) verified in `tests/test_phaseF_data_train.py` and `examples/phaseF_trainer.zen`.
+
+### Phase G — End-to-End Recipes & Acceptance Benchmark (Done)
+- Built & tested 5 recipes (`examples/zennum_basics.zen`, `examples/linear_regression.zen`, `examples/mlp_xor.zen`, `examples/tiny_classifier.zen`, `examples/gpt_in_40_lines.zen`) in `tests/test_phaseG_recipes.py`.
+
+### Phase H — ZenNum & ZenNet Docs + Expanded Beginner Guide (Done)
+- Added `docs/ZENNUM.md`, `docs/ZENNET.md`, Part A & B chapters/exercises in `docs/guide_examples/` & `tools/build_guide.py` (46-page `docs/Learn-ZEN.pdf`), and updated `README.md`.
+
+### Phase I — Multi-Platform Packaging & `v0.2.0` Release Prep (Done)
+- Packaged `stdlib/zennum/` and `stdlib/zennet/`, optional C extension in `setup.py`, `.github/workflows/wheels.yml` (`cibuildwheel`), bumped to `0.2.0`, tested wheel install in a clean venv.

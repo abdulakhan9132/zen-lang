@@ -1,0 +1,4 @@
+import zennet as nn
+
+let net = nn.Sequential([nn.Linear(2, 3), nn.GELU(), nn.Linear(3, 1)])
+say len(net.parameters())

@@ -1,0 +1,228 @@
+// ZenNet Training Loop, Evaluation Metrics, and Text Generation (pure ZEN)
+
+import zennum as zn
+import zennet.autograd as ag
+import zennet.nn as nn
+import zennet.optim as optim
+
+fn accuracy(logits, targets) {
+    let l = logits
+    if type(l) == "Tensor" {
+        l = l.data
+    } else {
+        l = zn.array(l, "float64")
+    }
+    let preds = zn.argmax(l, -1, false).flatten().tolist()
+    let t = targets
+    if type(t) == "Tensor" {
+        t = t.data
+    } else {
+        t = zn.array(t, "int64")
+    }
+    let t_flat = t.flatten().tolist()
+    let n = len(t_flat)
+    if n == 0 {
+        return 0.0
+    }
+    let hits = 0
+    let i = 0
+    while i < n {
+        if int(preds[i]) == int(t_flat[i]) {
+            hits = hits + 1
+        }
+        i = i + 1
+    }
+    return hits / n
+}
+
+fn perplexity(loss_val) {
+    let v = loss_val
+    if type(v) == "Tensor" {
+        v = v.item()
+    }
+    if v > 50.0 {
+        v = 50.0
+    }
+    return exp(v)
+}
+
+fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none) {
+    model.eval()
+    let seq = prompt_ids
+    if type(seq) == "array" or type(seq) == "Tensor" {
+        seq = seq.tolist()
+    }
+    if len(seq) > 0 and type(seq[0]) == "list" {
+        seq = seq[0]
+    }
+    let out = []
+    for tok in seq {
+        push(out, int(tok))
+    }
+
+    ag.no_grad(fn() {
+        let s = 0
+        while s < max_new_tokens {
+            let ctx = out
+            if len(out) > model.block_size {
+                ctx = out[len(out) - model.block_size : len(out)]
+            }
+            let logits = model.forward([ctx])
+            let last = logits.data[0, len(ctx) - 1, :]
+            let next_tok = 0
+            if temperature <= 0.0 {
+                next_tok = int(zn.argmax(last))
+            } else {
+                let scaled = last / temperature
+                if top_k != none and top_k < scaled.size {
+                    let sorted_vals = zn.sort(scaled)
+                    let thresh = sorted_vals[scaled.size - top_k]
+                    scaled = zn.where(scaled >= thresh, scaled, -1000000000.0)
+                }
+                let m = zn.max(scaled)
+                let exps = zn.exp(scaled - m)
+                let probs = (exps / zn.sum(exps)).tolist()
+                let r = random()
+                let cdf = 0.0
+                let i = 0
+                next_tok = len(probs) - 1
+                while i < len(probs) {
+                    cdf = cdf + probs[i]
+                    if r <= cdf {
+                        next_tok = i
+                        break
+                    }
+                    i = i + 1
+                }
+            }
+            push(out, next_tok)
+            s = s + 1
+        }
+        return none
+    })
+    return out
+}
+
+class Trainer {
+    fn init(
+        self,
+        model,
+        optimizer = none,
+        loss_fn = none,
+        lr = 0.01,
+        clip_grad = 1.0,
+        log_every = 10,
+        checkpoint_path = none,
+        save_every = 0
+    ) {
+        self.model = model
+        if optimizer == none {
+            self.optimizer = optim.AdamW(model.parameters(), lr)
+        } else {
+            self.optimizer = optimizer
+        }
+        if loss_fn == none {
+            self.loss_fn = nn.cross_entropy
+        } else {
+            self.loss_fn = loss_fn
+        }
+        self.clip_grad = clip_grad
+        self.log_every = log_every
+        self.checkpoint_path = checkpoint_path
+        self.save_every = save_every
+    }
+
+    fn _pull_batch(self, source, cursor) {
+        let t = type(source)
+        if t == "fn" or t == "vmclosure" or t == "function" or t == "builtin" {
+            return [source(), cursor]
+        }
+        if t == "DataLoader" {
+            let bs = source.batches()
+            let idx = cursor % len(bs)
+            return [bs[idx], cursor + 1]
+        }
+        if t == "Dataset" {
+            return [[source.x, source.y], cursor + 1]
+        }
+        return [source, cursor + 1]
+    }
+
+    fn _eval_loss(self, val_data) {
+        let res = self._pull_batch(val_data, 0)
+        let b = res[0]
+        self.model.eval()
+        let v = ag.no_grad(fn() {
+            return self.loss_fn(self.model.forward(b[0]), b[1]).item()
+        })
+        self.model.train()
+        return v
+    }
+
+    fn fit(self, train_data, steps = 100, val_data = none, resume = false) {
+        if resume and self.checkpoint_path != none and file_exists(self.checkpoint_path) {
+            self.model.load(self.checkpoint_path)
+        }
+        let history = []
+        let cursor = 0
+        let last_loss = 0.0
+        let last_val: any = none
+        let step = 1
+        while step <= steps {
+            self.model.train()
+            let pulled = self._pull_batch(train_data, cursor)
+            let batch = pulled[0]
+            cursor = pulled[1]
+
+            self.optimizer.zero_grad()
+            let out = self.model.forward(batch[0])
+            let loss = self.loss_fn(out, batch[1])
+            loss.backward()
+            if self.clip_grad > 0.0 {
+                optim.clip_grad_norm(self.model.parameters(), self.clip_grad)
+            }
+            self.optimizer.step()
+
+            last_loss = loss.item()
+            push(history, last_loss)
+
+            if self.checkpoint_path != none and self.save_every > 0 and step % self.save_every == 0 {
+                self.model.save(self.checkpoint_path)
+            }
+
+            if self.log_every > 0 and (step % self.log_every == 0 or step == 1 or step == steps) {
+                let msg = "step " + str(step) + "/" + str(steps) + " | loss: " + str(round(last_loss, 4))
+                if val_data != none {
+                    last_val = self._eval_loss(val_data)
+                    msg = msg + " | val_loss: " + str(round(last_val, 4))
+                }
+                say msg
+            }
+            step = step + 1
+        }
+        if val_data != none and last_val == none {
+            last_val = self._eval_loss(val_data)
+        }
+        if self.checkpoint_path != none {
+            self.model.save(self.checkpoint_path)
+        }
+        return {"loss_history": history, "final_loss": last_loss, "val_loss": last_val}
+    }
+}
+
+fn fit(
+    model,
+    train_data,
+    steps = 100,
+    optimizer = none,
+    loss_fn = none,
+    lr = 0.01,
+    val_data = none,
+    log_every = 0,
+    checkpoint_path = none,
+    save_every = 0,
+    resume = false
+) {
+    let tr = Trainer(model, optimizer, loss_fn, lr, 1.0, log_every, checkpoint_path, save_every)
+    return tr.fit(train_data, steps, val_data, resume)
+}

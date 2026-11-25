@@ -1,0 +1,833 @@
+// ZenNet Autograd — PyTorch-like automatic differentiation engine written in pure ZEN
+
+import zennum as zn
+
+let _GRAD_ENABLED = true
+let _NEXT_TENSOR_ID = 0
+
+fn is_grad_enabled() {
+    return _GRAD_ENABLED
+}
+
+fn set_grad_enabled(mode) {
+    _GRAD_ENABLED = mode
+}
+
+fn no_grad(func) {
+    let prev = _GRAD_ENABLED
+    _GRAD_ENABLED = false
+    let res = func()
+    _GRAD_ENABLED = prev
+    return res
+}
+
+fn _to_f64_array(val) {
+    let t = type(val)
+    if t == "Tensor" {
+        return val.data
+    }
+    if t == "array" {
+        if val.dtype == "float64" {
+            return val
+        }
+        return val.astype("float64")
+    }
+    return zn.array(val, "float64")
+}
+
+fn _as_tensor(val) {
+    if type(val) == "Tensor" {
+        return val
+    }
+    return Tensor(_to_f64_array(val), false)
+}
+
+fn _unbroadcast(grad, target_shape) {
+    let g = grad
+    let td = len(target_shape)
+    while len(g.shape) > td {
+        g = zn.array(zn.sum(g, 0, false), "float64")
+    }
+    let i = 0
+    while i < td {
+        if target_shape[i] == 1 and g.shape[i] > 1 {
+            g = zn.sum(g, i, true)
+        }
+        i = i + 1
+    }
+    return g
+}
+
+fn _swap_last_two(arr) {
+    let nd = arr.ndim
+    if nd < 2 {
+        return arr
+    }
+    let axes = []
+    let i = 0
+    while i < nd - 2 {
+        push(axes, i)
+        i = i + 1
+    }
+    push(axes, nd - 1)
+    push(axes, nd - 2)
+    return zn.transpose(arr, axes)
+}
+
+fn _inv_perm(axes) {
+    let n = len(axes)
+    let inv = []
+    let i = 0
+    while i < n {
+        push(inv, 0)
+        i = i + 1
+    }
+    i = 0
+    while i < n {
+        let ax = axes[i]
+        if ax < 0 {
+            ax = ax + n
+        }
+        inv[ax] = i
+        i = i + 1
+    }
+    return inv
+}
+
+fn _norm_axis(axis, ndim) {
+    if axis < 0 {
+        return axis + ndim
+    }
+    return axis
+}
+
+class Tensor {
+    fn init(self, data, requires_grad = false) {
+        _NEXT_TENSOR_ID = _NEXT_TENSOR_ID + 1
+        self._id = _NEXT_TENSOR_ID
+        if type(data) == "Tensor" {
+            self.data = data.data.copy()
+        } else {
+            self.data = _to_f64_array(data)
+        }
+        self.requires_grad = requires_grad
+        self.grad = none
+        self._prev = []
+        self._backward = none
+        self._op = ""
+        self.shape = self.data.shape
+        self.ndim = self.data.ndim
+        self.size = self.data.size
+        self.dtype = self.data.dtype
+    }
+
+    fn set_data(self, arr) {
+        self.data = _to_f64_array(arr)
+        self.shape = self.data.shape
+        self.ndim = self.data.ndim
+        self.size = self.data.size
+        self.dtype = self.data.dtype
+    }
+
+    fn zero_grad(self) {
+        self.grad = none
+    }
+
+    fn detach(self) {
+        return Tensor(self.data.copy(), false)
+    }
+
+    fn tolist(self) {
+        return self.data.tolist()
+    }
+
+    fn item(self) {
+        if self.size != 1 {
+            return self.data.tolist()
+        }
+        return self.data.flatten()[0]
+    }
+
+    fn _ensure_grad(self) {
+        if self.grad == none {
+            self.grad = zn.zeros(self.shape, "float64")
+        }
+    }
+
+    fn _make_out(self, out_data, children, req_grad, op_name, back_fn) {
+        let track = _GRAD_ENABLED and req_grad
+        let out = Tensor(out_data, track)
+        out._op = op_name
+        if track {
+            out._prev = children
+            out._backward = back_fn
+        }
+        return out
+    }
+
+    fn backward(self, grad = none) {
+        if grad == none {
+            self.grad = zn.ones(self.shape, "float64")
+        } else {
+            self.grad = _to_f64_array(grad)
+        }
+
+        // Iterative post-order topological sort (safe for deep graphs)
+        let topo = []
+        let state = {}
+        let stack = [[self, 0]]
+        while len(stack) > 0 {
+            let top = pop(stack)
+            let node = top[0]
+            let idx = top[1]
+            let prev = node._prev
+            if idx == 0 {
+                let st = 0
+                if contains(state, node._id) {
+                    st = state[node._id]
+                }
+                if st != 0 {
+                    continue
+                }
+                state[node._id] = 1
+            }
+            if idx < len(prev) {
+                push(stack, [node, idx + 1])
+                let ch = prev[idx]
+                let cst = 0
+                if contains(state, ch._id) {
+                    cst = state[ch._id]
+                }
+                if cst == 0 {
+                    push(stack, [ch, 0])
+                }
+            } else {
+                state[node._id] = 2
+                push(topo, node)
+            }
+        }
+
+        let i = len(topo) - 1
+        while i >= 0 {
+            let node = topo[i]
+            if node._backward != none and node.grad != none {
+                node._backward(node)
+            }
+            i = i - 1
+        }
+    }
+
+    // --- Arithmetic ---
+
+    fn __add__(self, other) {
+        let b = _as_tensor(other)
+        let out_data = self.data + b.data
+        let a = self
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + _unbroadcast(out.grad, a.shape)
+            }
+            if b.requires_grad {
+                b._ensure_grad()
+                b.grad = b.grad + _unbroadcast(out.grad, b.shape)
+            }
+        }
+        return self._make_out(out_data, [a, b], a.requires_grad or b.requires_grad, "+", _back)
+    }
+
+    fn __radd__(self, other) {
+        return _as_tensor(other).__add__(self)
+    }
+
+    fn __sub__(self, other) {
+        let b = _as_tensor(other)
+        let out_data = self.data - b.data
+        let a = self
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + _unbroadcast(out.grad, a.shape)
+            }
+            if b.requires_grad {
+                b._ensure_grad()
+                b.grad = b.grad - _unbroadcast(out.grad, b.shape)
+            }
+        }
+        return self._make_out(out_data, [a, b], a.requires_grad or b.requires_grad, "-", _back)
+    }
+
+    fn __rsub__(self, other) {
+        return _as_tensor(other).__sub__(self)
+    }
+
+    fn __mul__(self, other) {
+        let b = _as_tensor(other)
+        let out_data = self.data * b.data
+        let a = self
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + _unbroadcast(out.grad * b.data, a.shape)
+            }
+            if b.requires_grad {
+                b._ensure_grad()
+                b.grad = b.grad + _unbroadcast(out.grad * a.data, b.shape)
+            }
+        }
+        return self._make_out(out_data, [a, b], a.requires_grad or b.requires_grad, "*", _back)
+    }
+
+    fn __rmul__(self, other) {
+        return _as_tensor(other).__mul__(self)
+    }
+
+    fn __truediv__(self, other) {
+        let b = _as_tensor(other)
+        let out_data = self.data / b.data
+        let a = self
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + _unbroadcast(out.grad / b.data, a.shape)
+            }
+            if b.requires_grad {
+                b._ensure_grad()
+                b.grad = b.grad - _unbroadcast(out.grad * a.data / (b.data * b.data), b.shape)
+            }
+        }
+        return self._make_out(out_data, [a, b], a.requires_grad or b.requires_grad, "/", _back)
+    }
+
+    fn __rtruediv__(self, other) {
+        return _as_tensor(other).__truediv__(self)
+    }
+
+    fn __pow__(self, power) {
+        let a = self
+        if type(power) == "Tensor" {
+            let p = power
+            let out_data = zn.pow(a.data, p.data)
+            fn _back_t(out) {
+                if a.requires_grad {
+                    a._ensure_grad()
+                    a.grad = a.grad + _unbroadcast(out.grad * p.data * zn.pow(a.data, p.data - 1.0), a.shape)
+                }
+                if p.requires_grad {
+                    p._ensure_grad()
+                    p.grad = p.grad + _unbroadcast(out.grad * out.data * zn.log(a.data), p.shape)
+                }
+            }
+            return self._make_out(out_data, [a, p], a.requires_grad or p.requires_grad, "**", _back_t)
+        }
+        let out_data = zn.pow(a.data, power)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad * power * zn.pow(a.data, power - 1.0)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "**", _back)
+    }
+
+    fn __neg__(self) {
+        let a = self
+        let out_data = -a.data
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad - out.grad
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "neg", _back)
+    }
+
+    fn __matmul__(self, other) {
+        let a = self
+        let b = _as_tensor(other)
+        let out_data = zn.matmul(a.data, b.data)
+        fn _back(out) {
+            if a.ndim == 1 and b.ndim == 1 {
+                if a.requires_grad {
+                    a._ensure_grad()
+                    a.grad = a.grad + b.data * out.grad
+                }
+                if b.requires_grad {
+                    b._ensure_grad()
+                    b.grad = b.grad + a.data * out.grad
+                }
+            } elif a.ndim == 1 {
+                let g2 = zn.reshape(out.grad, [1, out.size])
+                if a.requires_grad {
+                    a._ensure_grad()
+                    let da = zn.matmul(g2, zn.transpose(b.data))
+                    a.grad = a.grad + zn.reshape(da, a.shape)
+                }
+                if b.requires_grad {
+                    b._ensure_grad()
+                    let a2 = zn.reshape(a.data, [1, a.size])
+                    b.grad = b.grad + zn.matmul(zn.transpose(a2), g2)
+                }
+            } elif b.ndim == 1 {
+                let g2 = zn.reshape(out.grad, [out.size, 1])
+                if a.requires_grad {
+                    a._ensure_grad()
+                    let b2 = zn.reshape(b.data, [b.size, 1])
+                    a.grad = a.grad + zn.matmul(g2, zn.transpose(b2))
+                }
+                if b.requires_grad {
+                    b._ensure_grad()
+                    let db = zn.matmul(zn.transpose(a.data), g2)
+                    b.grad = b.grad + zn.reshape(db, b.shape)
+                }
+            } else {
+                if a.requires_grad {
+                    a._ensure_grad()
+                    let da = zn.matmul(out.grad, _swap_last_two(b.data))
+                    a.grad = a.grad + _unbroadcast(da, a.shape)
+                }
+                if b.requires_grad {
+                    b._ensure_grad()
+                    let db = zn.matmul(_swap_last_two(a.data), out.grad)
+                    b.grad = b.grad + _unbroadcast(db, b.shape)
+                }
+            }
+        }
+        return self._make_out(out_data, [a, b], a.requires_grad or b.requires_grad, "@", _back)
+    }
+
+    fn __getitem__(self, idx) {
+        let a = self
+        let raw = a.data[idx]
+        let out_data = _to_f64_array(raw)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let da = zn.zeros(a.shape, "float64")
+                da[idx] = da[idx] + out.grad
+                a.grad = a.grad + da
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "slice", _back)
+    }
+
+    // --- Shape & Reductions ---
+
+    fn reshape(self, new_shape) {
+        let a = self
+        let out_data = zn.reshape(a.data, new_shape)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + zn.reshape(out.grad, a.shape)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "reshape", _back)
+    }
+
+    fn transpose(self, axes = none) {
+        let a = self
+        let out_data = zn.transpose(a.data, axes)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                if axes == none {
+                    a.grad = a.grad + zn.transpose(out.grad)
+                } else {
+                    a.grad = a.grad + zn.transpose(out.grad, _inv_perm(axes))
+                }
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "transpose", _back)
+    }
+
+    fn sum(self, axis = none, keepdims = false) {
+        let a = self
+        let res = zn.sum(a.data, axis, keepdims)
+        let out_data = zn.array(res, "float64")
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let g = out.grad
+                if axis != none and not keepdims {
+                    let ax = _norm_axis(axis, a.ndim)
+                    let ks = []
+                    let i = 0
+                    while i < a.ndim {
+                        if i == ax {
+                            push(ks, 1)
+                        } else {
+                            push(ks, a.shape[i])
+                        }
+                        i = i + 1
+                    }
+                    g = zn.reshape(g, ks)
+                }
+                a.grad = a.grad + g
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "sum", _back)
+    }
+
+    fn mean(self, axis = none, keepdims = false) {
+        let a = self
+        let res = zn.mean(a.data, axis, keepdims)
+        let out_data = zn.array(res, "float64")
+        let count = a.size
+        if axis != none {
+            let ax = _norm_axis(axis, a.ndim)
+            count = a.shape[ax]
+        }
+        let inv_n = 1.0 / count
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let g = out.grad
+                if axis != none and not keepdims {
+                    let ax = _norm_axis(axis, a.ndim)
+                    let ks = []
+                    let i = 0
+                    while i < a.ndim {
+                        if i == ax {
+                            push(ks, 1)
+                        } else {
+                            push(ks, a.shape[i])
+                        }
+                        i = i + 1
+                    }
+                    g = zn.reshape(g, ks)
+                }
+                a.grad = a.grad + g * inv_n
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "mean", _back)
+    }
+
+    // --- Elementwise math & activations ---
+
+    fn abs(self) {
+        let a = self
+        let out_data = zn.abs(a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let sgn = zn.where(a.data > 0.0, 1.0, zn.where(a.data < 0.0, -1.0, 0.0))
+                a.grad = a.grad + out.grad * sgn
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "abs", _back)
+    }
+
+    fn sqrt(self) {
+        let a = self
+        let out_data = zn.sqrt(a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad * (0.5 / out.data)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "sqrt", _back)
+    }
+
+    fn exp(self) {
+        let a = self
+        let out_data = zn.exp(a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad * out.data
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "exp", _back)
+    }
+
+    fn log(self) {
+        let a = self
+        let out_data = zn.log(a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad / a.data
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "log", _back)
+    }
+
+    fn sin(self) {
+        let a = self
+        let out_data = zn.sin(a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad * zn.cos(a.data)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "sin", _back)
+    }
+
+    fn cos(self) {
+        let a = self
+        let out_data = zn.cos(a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad - out.grad * zn.sin(a.data)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "cos", _back)
+    }
+
+    fn clip(self, lo, hi) {
+        let a = self
+        let out_data = zn.clip(a.data, lo, hi)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let m = zn.ones(a.shape, "float64")
+                if lo != none {
+                    m = zn.where(a.data < lo, 0.0, m)
+                }
+                if hi != none {
+                    m = zn.where(a.data > hi, 0.0, m)
+                }
+                a.grad = a.grad + out.grad * m
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "clip", _back)
+    }
+
+    fn relu(self) {
+        let a = self
+        let out_data = zn.where(a.data > 0.0, a.data, 0.0)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let mask = zn.where(a.data > 0.0, 1.0, 0.0)
+                a.grad = a.grad + out.grad * mask
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "relu", _back)
+    }
+
+    fn tanh(self) {
+        let a = self
+        let out_data = zn.tanh(a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad * (1.0 - out.data * out.data)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "tanh", _back)
+    }
+
+    fn sigmoid(self) {
+        let a = self
+        let s = 0.5 * (1.0 + zn.tanh(0.5 * a.data))
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad * out.data * (1.0 - out.data)
+            }
+        }
+        return self._make_out(s, [a], a.requires_grad, "sigmoid", _back)
+    }
+
+    fn gelu(self) {
+        let a = self
+        let k = 0.7978845608028654
+        let c = 0.044715
+        let x = a.data
+        let x2 = x * x
+        let x3 = x2 * x
+        let th = zn.tanh(k * (x + c * x3))
+        let out_data = 0.5 * x * (1.0 + th)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let sech2 = 1.0 - th * th
+                let d_inner = k * (1.0 + 3.0 * c * x2)
+                let d_gelu = 0.5 * (1.0 + th) + 0.5 * x * sech2 * d_inner
+                a.grad = a.grad + out.grad * d_gelu
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "gelu", _back)
+    }
+
+    fn softmax(self, axis = -1) {
+        let a = self
+        let m = zn.max(a.data, axis, true)
+        let e = zn.exp(a.data - m)
+        let denom = zn.sum(e, axis, true)
+        let probs = e / denom
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let dot = zn.sum(out.grad * out.data, axis, true)
+                a.grad = a.grad + out.data * (out.grad - dot)
+            }
+        }
+        return self._make_out(probs, [a], a.requires_grad, "softmax", _back)
+    }
+
+    fn log_softmax(self, axis = -1) {
+        let a = self
+        let m = zn.max(a.data, axis, true)
+        let shifted = a.data - m
+        let lse = zn.log(zn.sum(zn.exp(shifted), axis, true))
+        let out_data = shifted - lse
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let probs = zn.exp(out.data)
+                let s = zn.sum(out.grad, axis, true)
+                a.grad = a.grad + (out.grad - probs * s)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "log_softmax", _back)
+    }
+
+    fn dropout(self, p = 0.1, training = true) {
+        if not training or p <= 0.0 {
+            return self
+        }
+        let a = self
+        let scale = 1.0 / (1.0 - p)
+        let keep = zn.where(zn.rand(a.shape) >= p, scale, 0.0)
+        let out_data = a.data * keep
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + out.grad * keep
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "dropout", _back)
+    }
+
+    fn masked_fill(self, mask, value) {
+        let a = self
+        let m = zn.array(mask, "bool")
+        let out_data = zn.where(m, value, a.data)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + zn.where(m, 0.0, out.grad)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "masked_fill", _back)
+    }
+
+    fn gather(self, indices) {
+        let a = self
+        let idx = indices
+        if type(idx) == "Tensor" {
+            idx = idx.data
+        }
+        let out_data = zn.gather(a.data, idx)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                let da = zn.scatter_add(a.shape, idx, out.grad)
+                a.grad = a.grad + da
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "gather", _back)
+    }
+
+    fn layernorm(self, gamma = none, beta = none, eps = 1e-5) {
+        let a = self
+        let x = a.data
+        let mean = zn.mean(x, -1, true)
+        let diff = x - mean
+        let var = zn.mean(diff * diff, -1, true)
+        let inv_std = 1.0 / zn.sqrt(var + eps)
+        let x_hat = diff * inv_std
+        let out_data = x_hat
+        let g: any = none
+        let b: any = none
+        let children = [a]
+        let req = a.requires_grad
+        if gamma != none {
+            g = _as_tensor(gamma)
+            out_data = out_data * g.data
+            push(children, g)
+            req = req or g.requires_grad
+        }
+        if beta != none {
+            b = _as_tensor(beta)
+            out_data = out_data + b.data
+            push(children, b)
+            req = req or b.requires_grad
+        }
+        let d = a.shape[len(a.shape) - 1]
+        fn _back(out) {
+            let dy = out.grad
+            if b != none and b.requires_grad {
+                b._ensure_grad()
+                b.grad = b.grad + _unbroadcast(dy, b.shape)
+            }
+            if g != none and g.requires_grad {
+                g._ensure_grad()
+                g.grad = g.grad + _unbroadcast(dy * x_hat, g.shape)
+            }
+            if a.requires_grad {
+                a._ensure_grad()
+                let dx_hat = dy
+                if g != none {
+                    dx_hat = dy * g.data
+                }
+                let sum_dx = zn.sum(dx_hat, -1, true)
+                let sum_dx_xh = zn.sum(dx_hat * x_hat, -1, true)
+                let dx = (inv_std / d) * (d * dx_hat - sum_dx - x_hat * sum_dx_xh)
+                a.grad = a.grad + dx
+            }
+        }
+        return self._make_out(out_data, children, req, "layernorm", _back)
+    }
+}
+
+// --- Functional helpers matching nn.* style ---
+
+fn tensor(data, requires_grad = false) {
+    return Tensor(data, requires_grad)
+}
+
+fn zeros(shape, requires_grad = false) {
+    return Tensor(zn.zeros(shape, "float64"), requires_grad)
+}
+
+fn ones(shape, requires_grad = false) {
+    return Tensor(zn.ones(shape, "float64"), requires_grad)
+}
+
+fn randn(shape, requires_grad = false) {
+    return Tensor(zn.randn(shape, "float64"), requires_grad)
+}
+
+fn rand(shape, requires_grad = false) {
+    return Tensor(zn.rand(shape, "float64"), requires_grad)
+}
+
+fn reshape(t, shape) { return _as_tensor(t).reshape(shape) }
+fn transpose(t, axes = none) { return _as_tensor(t).transpose(axes) }
+fn sum(t, axis = none, keepdims = false) { return _as_tensor(t).sum(axis, keepdims) }
+fn mean(t, axis = none, keepdims = false) { return _as_tensor(t).mean(axis, keepdims) }
+fn abs(t) { return _as_tensor(t).abs() }
+fn sqrt(t) { return _as_tensor(t).sqrt() }
+fn exp(t) { return _as_tensor(t).exp() }
+fn log(t) { return _as_tensor(t).log() }
+fn sin(t) { return _as_tensor(t).sin() }
+fn cos(t) { return _as_tensor(t).cos() }
+fn clip(t, lo, hi) { return _as_tensor(t).clip(lo, hi) }
+fn relu(t) { return _as_tensor(t).relu() }
+fn tanh(t) { return _as_tensor(t).tanh() }
+fn sigmoid(t) { return _as_tensor(t).sigmoid() }
+fn gelu(t) { return _as_tensor(t).gelu() }
+fn softmax(t, axis = -1) { return _as_tensor(t).softmax(axis) }
+fn log_softmax(t, axis = -1) { return _as_tensor(t).log_softmax(axis) }
+fn dropout(t, p = 0.1, training = true) { return _as_tensor(t).dropout(p, training) }
+fn masked_fill(t, mask, value) { return _as_tensor(t).masked_fill(mask, value) }
+fn gather(t, indices) { return _as_tensor(t).gather(indices) }
+fn embedding(table, indices) { return _as_tensor(table).gather(indices) }
+fn layernorm(t, gamma = none, beta = none, eps = 1e-5) { return _as_tensor(t).layernorm(gamma, beta, eps) }

@@ -1,0 +1,8 @@
+import zennum as zn
+
+let x = zn.array([[1.0, 2.0], [3.0, 4.0]])
+let bias = zn.array([10.0, 20.0])
+say "x + bias = " + str(x + bias)
+say "row sums = " + str(zn.sum(x, 1))
+say "mean = " + str(zn.mean(x))
+say "x @ x = " + str(x @ x)

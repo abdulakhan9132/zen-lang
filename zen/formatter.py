@@ -195,6 +195,8 @@ def format_source(source: str) -> str:
             return False
         if cur.type in (TokenType.COMMA, TokenType.COLON, TokenType.RPAREN, TokenType.RBRACKET, TokenType.DOT, TokenType.SEMICOLON):
             return False
+        if prev.type == TokenType.COLON and container_stack and container_stack[-1][0] == "list":
+            return False
         if prev.type in (TokenType.LPAREN, TokenType.LBRACKET, TokenType.DOT):
             return False
         if prev.type == TokenType.LBRACE:

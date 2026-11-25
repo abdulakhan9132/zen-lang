@@ -1,0 +1,7 @@
+import zennet as nn
+
+let bpe = nn.BPETokenizer(20)
+bpe.fit("zen ai zen ai fast fast")
+let ids = bpe.encode("zen ai")
+say "ids = " + str(ids)
+say "text = " + bpe.decode(ids)

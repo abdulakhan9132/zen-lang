@@ -1,0 +1,11 @@
+import zennet as nn
+
+let w = nn.tensor([4.0], true)
+let opt = nn.SGD([w], 0.25)
+for i in range(15) {
+    opt.zero_grad()
+    let loss = ((w - 1.0) ** 2.0).sum()
+    loss.backward()
+    opt.step()
+}
+say round(w.item(), 3)

@@ -1,0 +1,30 @@
+import zennum as zn
+import zennet.nn as nn
+import zennet.optim as optim
+
+zn.seed(42)
+
+let model = nn.Sequential([
+    nn.Linear(2, 8),
+    nn.Tanh(),
+    nn.Linear(8, 1),
+])
+
+let opt = optim.AdamW(model.parameters(), 0.08)
+let sched = optim.CosineAnnealingLR(opt, 60, 0.01)
+
+let X = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
+let Y = [[0.0], [1.0], [1.0], [0.0]]
+
+let loss_val = 0.0
+for step in range(60) {
+    opt.zero_grad()
+    let loss = nn.mse(model(X), Y)
+    loss.backward()
+    optim.clip_grad_norm(model.parameters(), 2.0)
+    opt.step()
+    sched.step()
+    loss_val = loss.item()
+}
+
+say "Final XOR loss: " + str(round(loss_val, 4)) + ", final lr: " + str(round(opt.lr, 4))

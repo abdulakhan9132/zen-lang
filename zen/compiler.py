@@ -24,11 +24,13 @@ class _FunctionCompiler:
         params: list[str],
         parent: "_FunctionCompiler | None" = None,
         is_module: bool = False,
+        num_defaults: int = 0,
     ) -> None:
         self.name = name
         self.params = params
         self.parent = parent
         self.is_module = is_module
+        self.num_defaults = num_defaults
 
         self.instructions: list[Instruction] = []
         self.scopes: list[dict[str, tuple[int, bool]]] = [{}]
@@ -130,6 +132,7 @@ class _FunctionCompiler:
             cell_slots=tuple(self.slot_is_cell),
             upvalues=tuple(self.upvalues),
             is_module=self.is_module,
+            num_defaults=self.num_defaults,
         ).finalize_flat()
 
     def compile_block(self, block: ast.Block) -> None:
@@ -196,8 +199,11 @@ class _FunctionCompiler:
             return
 
         if isinstance(node, ast.FnDecl):
+            defs = [d for d in (node.defaults or []) if d is not None]
             if self._is_module_top_level():
-                fn_code = self._compile_function(node.name, node.params, node.body)
+                for d in defs:
+                    self.compile_expr(d)
+                fn_code = self._compile_function(node.name, node.params, node.body, len(defs))
                 self._emit(Op.MAKE_CLOSURE, fn_code, node)
                 self._emit(Op.DEFINE_GLOBAL, (node.name, False), node)
             else:
@@ -205,7 +211,9 @@ class _FunctionCompiler:
                 # Pre-allocate local slot/cell so recursive calls inside body capture the Cell
                 self._emit(Op.LOAD_CONST, None, node)
                 self._emit(Op.STORE_LOCAL, (slot, False, True), node)
-                fn_code = self._compile_function(node.name, node.params, node.body)
+                for d in defs:
+                    self.compile_expr(d)
+                fn_code = self._compile_function(node.name, node.params, node.body, len(defs))
                 self._emit(Op.MAKE_CLOSURE, fn_code, node)
                 self._emit(Op.STORE_LOCAL, (slot, False, False), node)
             return
@@ -213,10 +221,16 @@ class _FunctionCompiler:
         if isinstance(node, ast.ClassDecl):
             method_names: list[str] = []
             for m in node.methods:
-                m_code = self._compile_function(m.name, m.params, m.body)
+                m_defs = [d for d in (m.defaults or []) if d is not None]
+                for d in m_defs:
+                    self.compile_expr(d)
+                m_code = self._compile_function(m.name, m.params, m.body, len(m_defs))
                 self._emit(Op.MAKE_CLOSURE, m_code, m)
                 method_names.append(m.name)
-            self._emit(Op.BUILD_CLASS, (node.name, tuple(method_names)), node)
+            has_super = node.superclass is not None
+            if node.superclass is not None:
+                self.compile_expr(node.superclass)
+            self._emit(Op.BUILD_CLASS, (node.name, tuple(method_names), has_super), node)
             if self._is_module_top_level():
                 self._emit(Op.DEFINE_GLOBAL, (node.name, False), node)
             else:
@@ -312,8 +326,8 @@ class _FunctionCompiler:
 
         raise ZenRuntimeError(f"Unsupported statement in compiler: {type(node).__name__}", node.line, node.column)
 
-    def _compile_function(self, name: str, params: list[str], body: ast.Block) -> CodeObject:
-        child = _FunctionCompiler(name, params, parent=self, is_module=False)
+    def _compile_function(self, name: str, params: list[str], body: ast.Block, num_defaults: int = 0) -> CodeObject:
+        child = _FunctionCompiler(name, params, parent=self, is_module=False, num_defaults=num_defaults)
         for stmt in body.statements:
             child.compile_stmt(stmt)
         child._emit(Op.LOAD_CONST, None, body)
@@ -367,8 +381,33 @@ class _FunctionCompiler:
             return
 
         if isinstance(node, ast.FnExpr):
-            fn_code = self._compile_function("<lambda>", node.params, node.body)
+            defs = [d for d in (node.defaults or []) if d is not None]
+            for d in defs:
+                self.compile_expr(d)
+            fn_code = self._compile_function("<lambda>", node.params, node.body, len(defs))
             self._emit(Op.MAKE_CLOSURE, fn_code, node)
+            return
+
+        if isinstance(node, ast.SliceExpr):
+            if node.start is not None:
+                self.compile_expr(node.start)
+            else:
+                self._emit(Op.LOAD_CONST, None, node)
+            if node.stop is not None:
+                self.compile_expr(node.stop)
+            else:
+                self._emit(Op.LOAD_CONST, None, node)
+            if node.step is not None:
+                self.compile_expr(node.step)
+            else:
+                self._emit(Op.LOAD_CONST, None, node)
+            self._emit(Op.BUILD_SLICE, None, node)
+            return
+
+        if isinstance(node, ast.TupleExpr):
+            for el in node.elements:
+                self.compile_expr(el)
+            self._emit(Op.BUILD_TUPLE, len(node.elements), node)
             return
 
         if isinstance(node, ast.UnaryExpr):

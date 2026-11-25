@@ -1,0 +1,24 @@
+import zennum as zn
+import zennet as nn
+
+zn.seed(7)
+
+// Synthetic 2-class 2D dataset
+let c0 = zn.randn([30, 2]) * 0.5 - 1.5
+let c1 = zn.randn([30, 2]) * 0.5 + 1.5
+let X = zn.concat([c0, c1], 0)
+let y0 = zn.zeros([30], "int64").tolist()
+let y1 = zn.ones([30], "int64").tolist()
+let Y = y0 + y1
+
+let splits = nn.train_val_split(X, Y, 0.25, true, 7)
+let loader = nn.DataLoader(splits[0], 16, true, 7)
+
+let model = nn.Sequential([nn.Linear(2, 12), nn.ReLU(), nn.Linear(12, 2)])
+let info = nn.fit(model, loader, 45, none, nn.cross_entropy, 0.05)
+
+model.eval()
+let val_logits = nn.no_grad(fn() { return model(splits[1].x) })
+let val_acc = nn.accuracy(val_logits, splits[1].y)
+say "Final train loss: " + str(round(info["final_loss"], 4))
+say "Validation accuracy: " + str(round(val_acc * 100.0, 1)) + "%"

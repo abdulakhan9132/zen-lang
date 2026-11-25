@@ -26,8 +26,21 @@ def resolve_import_path(path_str: str, base_dir: Path) -> Path | None:
     if resolved.is_file():
         return resolved
 
-    # Fallback: resolve `stdlib/...` or `../stdlib/...` from packaged stdlib
+    # Fallback: resolve `pkg:...` (`import zennum`), `stdlib/...`, or `../stdlib/...`
     normalized = path_str.replace("\\", "/")
+    if normalized.startswith("pkg:"):
+        pkg_parts = normalized[4:].split(".")
+        candidates = [
+            "/".join(pkg_parts) + ".zen",
+            "/".join(pkg_parts) + "/__init__.zen",
+        ]
+        for stdlib_root in (_PKG_STDLIB, _REPO_STDLIB):
+            for rel in candidates:
+                pkg_candidate = (stdlib_root / rel).resolve()
+                if pkg_candidate.is_file():
+                    return pkg_candidate
+        return None
+
     if "stdlib/" in normalized:
         rel_sub = normalized.split("stdlib/", 1)[1]
     else:

@@ -4,9 +4,11 @@
 
 # ZEN
 
-A minimal, readable programming language built from scratch for learning and building AI models in pure `.zen` code without external ML libraries.
+**ZEN is the language. ZenNum handles numbers. ZenNet builds neural networks.**
 
-**[Read the Beginner Guide: Learn ZEN (PDF)](docs/Learn-ZEN.pdf)** — or run `zen guide` after installing.
+A minimal, readable programming language built from scratch for learning coding and building real AI models (from linear regression to Transformer GPTs) in pure `.zen` code — with zero external AI libraries (`numpy`/`torch` never used).
+
+**[Beginner Guide: Learn ZEN (PDF)](docs/Learn-ZEN.pdf)** · **[ZenNum Reference](docs/ZENNUM.md)** · **[ZenNet Reference](docs/ZENNET.md)** — or run `zen guide` after installing.
 
 ## Installation
 
@@ -17,47 +19,47 @@ pip install zen-lang
 Or install from source:
 
 ```bash
-git clone https://github.com/<your-username>/zen-lang.git
+git clone https://github.com/AbdullahKhanSuri/zen-lang.git
 cd zen-lang
 pip install -e .
 ```
 
-## Hello World
+## ZenNum Quickstart (`import zennum as zn`)
 
 ```zen
-// hello.zen
-let language: string = "ZEN"
-let version: float = 0.1
+import zennum as zn
 
-fn introduce(name: string, ver: float) {
-    say "I am " + name
-    say ver
-}
-
-introduce(language, version)
+let a = zn.arange(1, 7).reshape([2, 3])
+let b = zn.ones([1, 3]) * 10
+say a + b            // Broadcast addition
+say a[0:2, 1:3]      // Multi-dimensional slicing
+say a[a > 3]         // Boolean masking
 ```
 
-## AI Example (XOR Neural Network in `.zen`)
+## Neural Network in 15 Lines (`examples/mlp_xor.zen`)
 
 ```zen
-import "stdlib/ai/nn.zen" as nn
+import zennum as zn
+import zennet as nn
 
-seed(42)
-let xs = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
-let ys = [0.0, 1.0, 1.0, 0.0]
-let model = nn.MLP([nn.Dense(2, 4, "tanh"), nn.Dense(4, 1, "sigmoid")])
-let opt = nn.SGD(model.parameters(), 0.8)
+zn.seed(42)
+let X = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
+let Y = [[0.0], [1.0], [1.0], [0.0]]
 
-for epoch in range(200) {
-    let preds = []
-    for x in xs { push(preds, model.forward(x)) }
-    let loss = nn.mse_loss(preds, ys)
+let model = nn.Sequential([nn.Linear(2, 8), nn.Tanh(), nn.Linear(8, 1), nn.Sigmoid()])
+let opt = nn.Adam(model.parameters(), 0.08)
+for step in range(150) {
     opt.zero_grad()
+    let loss = nn.mse(model(X), Y)
     loss.backward()
     opt.step()
 }
-say "final XOR loss = " + str(round(model.forward([1.0, 0.0]).data, 4))
+say "XOR predictions: " + str(map(model(X).data.flatten().tolist(), fn(v) { return round(v, 3) }))
 ```
+
+## GPT Language Model in ~40 Lines (`examples/gpt_in_40_lines.zen`)
+
+Train a multi-head causal Transformer GPT from scratch using `nn.CharTokenizer`, `nn.GPT`, `nn.AdamW`, `nn.cross_entropy`, and `nn.generate` — see [`examples/gpt_in_40_lines.zen`](examples/gpt_in_40_lines.zen).
 
 ## CLI Commands
 
@@ -72,9 +74,9 @@ say "final XOR loss = " + str(round(model.forward([1.0, 0.0]).data, 4))
 
 ## Current Limitations
 
-- **Slow pure-Python tensors:** Matrix operations run on pure Python lists without C extensions, SIMD, or GPU acceleration (`~51 ms/step` on a `d_model=16`, `batch_size=4` character model).
-- **Tiny GPT only:** The included character-level model (`AutoCharGPT`) is intentionally small for low-RAM machines and learns character/syllable patterns rather than fluent language.
-- **No native compiler yet:** Execution uses a Python bytecode VM (no LLVM, C codegen, package manager, or LSP yet).
+- **CPU-only execution:** Runs optional C native kernels (`zen/native/zen_kernels.c`) when compiled, falling back automatically to pure-Python flat buffers when no C compiler is present (`~0.63s` for `256x256` matmul; `~355 ms/step` on a 2-layer `d_model=16` GPT).
+- **Small datasets & models:** Examples target low-RAM laptops (`examples/data/corpus.txt`) rather than GPU-scale training.
+- **Bytecode VM only:** No LLVM/native AOT compiler, external package registry, or LSP server yet.
 
 ## License
 

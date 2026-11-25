@@ -1,0 +1,179 @@
+// ZenNum — Fast N-dimensional arrays and math for ZEN
+
+let backend = _zennum_rt.backend
+
+fn array(data, dtype = none) {
+    return _zennum_rt.array(data, dtype)
+}
+
+fn zeros(shape, dtype = "float64") {
+    return _zennum_rt.zeros(shape, dtype)
+}
+
+fn ones(shape, dtype = "float64") {
+    return _zennum_rt.ones(shape, dtype)
+}
+
+fn full(shape, value, dtype = none) {
+    return _zennum_rt.full(shape, value, dtype)
+}
+
+fn arange(start, stop = none, step = 1, dtype = none) {
+    return _zennum_rt.arange(start, stop, step, dtype)
+}
+
+fn linspace(start, stop, num = 50, dtype = "float64") {
+    return _zennum_rt.linspace(start, stop, num, dtype)
+}
+
+fn eye(n, m = none, dtype = "float64") {
+    return _zennum_rt.eye(n, m, dtype)
+}
+
+fn rand(shape, dtype = "float64") {
+    return _zennum_rt.rand(shape, dtype)
+}
+
+fn randn(shape, dtype = "float64") {
+    return _zennum_rt.randn(shape, dtype)
+}
+
+fn seed(s) {
+    return _zennum_rt.seed(s)
+}
+
+fn reshape(a, shape) {
+    return _zennum_rt.reshape(a, shape)
+}
+
+fn transpose(a, axes = none) {
+    return _zennum_rt.transpose(a, axes)
+}
+
+fn flatten(a) {
+    return _zennum_rt.array(a).flatten()
+}
+
+fn squeeze(a, axis = none) {
+    return _zennum_rt.array(a).squeeze(axis)
+}
+
+fn unsqueeze(a, axis) {
+    return _zennum_rt.array(a).unsqueeze(axis)
+}
+
+fn concat(arrs, axis = 0) {
+    return _zennum_rt.concat(arrs, axis)
+}
+
+fn stack(arrs, axis = 0) {
+    return _zennum_rt.stack(arrs, axis)
+}
+
+fn split(a, sections, axis = 0) {
+    return _zennum_rt.split(a, sections, axis)
+}
+
+fn where(cond, x, y) {
+    return _zennum_rt.where(cond, x, y)
+}
+
+fn clip(a, lo, hi) {
+    return _zennum_rt.clip(a, lo, hi)
+}
+
+fn abs(a) {
+    return _zennum_rt.abs(a)
+}
+
+fn sqrt(a) {
+    return _zennum_rt.sqrt(a)
+}
+
+fn exp(a) {
+    return _zennum_rt.exp(a)
+}
+
+fn log(a) {
+    return _zennum_rt.log(a)
+}
+
+fn sin(a) {
+    return _zennum_rt.sin(a)
+}
+
+fn cos(a) {
+    return _zennum_rt.cos(a)
+}
+
+fn tanh(a) {
+    return _zennum_rt.tanh(a)
+}
+
+fn pow(a, p) {
+    return _zennum_rt.pow(a, p)
+}
+
+fn sum(a, axis = none, keepdims = false) {
+    return _zennum_rt.sum(a, axis, keepdims)
+}
+
+fn mean(a, axis = none, keepdims = false) {
+    return _zennum_rt.mean(a, axis, keepdims)
+}
+
+fn std(a, axis = none, keepdims = false) {
+    return _zennum_rt.std(a, axis, keepdims)
+}
+
+fn var(a, axis = none, keepdims = false) {
+    return _zennum_rt.var(a, axis, keepdims)
+}
+
+fn min(a, axis = none, keepdims = false) {
+    return _zennum_rt.min(a, axis, keepdims)
+}
+
+fn max(a, axis = none, keepdims = false) {
+    return _zennum_rt.max(a, axis, keepdims)
+}
+
+fn argmax(a, axis = none, keepdims = false) {
+    return _zennum_rt.argmax(a, axis, keepdims)
+}
+
+fn argmin(a, axis = none, keepdims = false) {
+    return _zennum_rt.argmin(a, axis, keepdims)
+}
+
+fn sort(a, axis = -1) {
+    return _zennum_rt.sort(a, axis)
+}
+
+fn cumsum(a, axis = none) {
+    return _zennum_rt.cumsum(a, axis)
+}
+
+fn dot(a, b) {
+    return _zennum_rt.dot(a, b)
+}
+
+fn matmul(a, b) {
+    return _zennum_rt.matmul(a, b)
+}
+
+fn outer(a, b) {
+    return _zennum_rt.outer(a, b)
+}
+
+fn norm(a, axis = none, keepdims = false) {
+    return _zennum_rt.norm(a, axis, keepdims)
+}
+
+fn gather(table, indices) {
+    return _zennum_rt.gather(table, indices)
+}
+
+fn scatter_add(shape, indices, values) {
+    return _zennum_rt.scatter_add(shape, indices, values)
+}

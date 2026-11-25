@@ -28,6 +28,7 @@ from zen.parser import parse
 from zen.paths import resolve_import_path
 from zen.tensor import ZenTensor
 from zen.typechecker import type_check_program
+from zen.zennum_core import ZenArray
 
 
 @dataclass
@@ -39,11 +40,18 @@ class _Cell:
 class VMClosure:
     """Compiled ZEN function with captured closure cells and defining module globals."""
 
-    def __init__(self, code: CodeObject, upvalues: tuple[_Cell, ...], globals_env: Environment) -> None:
+    def __init__(
+        self,
+        code: CodeObject,
+        upvalues: tuple[_Cell, ...],
+        globals_env: Environment,
+        defaults: tuple[Any, ...] = (),
+    ) -> None:
         self.code = code
         self.name = code.name
         self.upvalues = upvalues
         self.globals_env = globals_env
+        self.defaults = defaults
 
     def call(
         self,
@@ -53,15 +61,21 @@ class VMClosure:
         col: int,
         bound_self: ZenInstance | None = None,
     ) -> Any:
-        expected = len(self.code.params)
-        actual_args = ([bound_self] + args) if bound_self is not None else args
-        if len(actual_args) != expected:
-            shown = expected - 1 if bound_self is not None and expected > 0 else expected
+        total = len(self.code.params)
+        min_total = total - len(self.defaults)
+        actual_args = ([bound_self] + args) if bound_self is not None else list(args)
+        if len(actual_args) < min_total or len(actual_args) > total:
+            offset = 1 if bound_self is not None and total > 0 else 0
+            shown_min = max(0, min_total - offset)
+            shown_max = max(0, total - offset)
+            exp = f"{shown_min}" if shown_min == shown_max else f"{shown_min} to {shown_max}"
             raise ZenRuntimeError(
-                f"Function '{self.name}' expected {shown} argument(s), got {len(args)}",
+                f"Function '{self.name}' expected {exp} argument(s), got {len(args)}",
                 line,
                 col,
             )
+        if len(actual_args) < total:
+            actual_args = actual_args + list(self.defaults[len(actual_args) - min_total :])
         return vm._execute_code(self.code, self.upvalues, actual_args, self.globals_env)
 
 
@@ -81,13 +95,19 @@ class VMBoundMethod:
 class VMClass(ZenClass):
     """Class representation using VMClosures for methods."""
 
-    def __init__(self, name: str, methods: dict[str, VMClosure]) -> None:  # type: ignore[override]
+    def __init__(
+        self,
+        name: str,
+        methods: dict[str, VMClosure],
+        parent: ZenClass | None = None,
+    ) -> None:  # type: ignore[override]
         self.name = name
         self.methods = methods  # type: ignore[assignment]
+        self.parent = parent
 
     def call(self, vm: "VM", args: list[Any], line: int, col: int) -> ZenInstance:  # type: ignore[override]
-        instance = ZenInstance(self)
-        init_method = self.methods.get("init")
+        instance = _VMInstance(self)
+        init_method = self.find_method("init")
         if init_method is not None:
             init_method.call(vm, args, line, col, bound_self=instance)  # type: ignore[arg-type]
         elif args:
@@ -103,8 +123,9 @@ class _VMInstance(ZenInstance):
     def get(self, name: str, line: int, col: int) -> Any:
         if name in self.fields:
             return self.fields[name]
-        if name in self.klass.methods:
-            return VMBoundMethod(self, self.klass.methods[name])  # type: ignore[arg-type]
+        method = self.klass.find_method(name)
+        if method is not None:
+            return VMBoundMethod(self, method)  # type: ignore[arg-type]
         raise ZenRuntimeError(
             f"'{self.klass.name}' instance has no field or method '{name}'",
             line,
@@ -112,10 +133,9 @@ class _VMInstance(ZenInstance):
         )
 
 
-# Patch VMClass.call to instantiate _VMInstance so member access returns VMBoundMethod
 def _vm_class_call(self: VMClass, vm: "VM", args: list[Any], line: int, col: int) -> ZenInstance:
     instance = _VMInstance(self)
-    init_method = self.methods.get("init")
+    init_method = self.find_method("init")
     if init_method is not None:
         init_method.call(vm, args, line, col, bound_self=instance)  # type: ignore[arg-type]
     elif args:
@@ -155,6 +175,8 @@ _OP_LOAD_UPVALUE = int(Op.LOAD_UPVALUE)
 _OP_STORE_UPVALUE = int(Op.STORE_UPVALUE)
 _OP_BUILD_LIST = int(Op.BUILD_LIST)
 _OP_BUILD_MAP = int(Op.BUILD_MAP)
+_OP_BUILD_TUPLE = int(Op.BUILD_TUPLE)
+_OP_BUILD_SLICE = int(Op.BUILD_SLICE)
 _OP_GET_INDEX = int(Op.GET_INDEX)
 _OP_SET_INDEX = int(Op.SET_INDEX)
 _OP_GET_MEMBER = int(Op.GET_MEMBER)
@@ -193,6 +215,8 @@ class VM:
         self.globals.define("str", ZenBuiltin("str", lambda x: zen_format(x)))
         self.globals.define("type", ZenBuiltin("type", zen_type))
         register_phase4_builtins(self, ZenBuiltin)  # type: ignore[arg-type]
+        self._builtin_names = set(self.globals.values.keys())
+        self._builtin_values = {k: self.globals.values[k].value for k in self._builtin_names}
 
     def _builtin_print(self, *args: Any) -> None:
         self.stdout.write(" ".join(zen_format(a) for a in args) + "\n")
@@ -200,7 +224,7 @@ class VM:
     def _builtin_len(self, obj: Any) -> int:
         if isinstance(obj, (list, dict, str)):
             return len(obj)
-        if isinstance(obj, ZenTensor):
+        if isinstance(obj, (ZenTensor, ZenArray)):
             return obj.shape[0] if obj.shape else 1
         raise ZenRuntimeError(f"Object of type '{zen_type(obj)}' has no len()")
 
@@ -247,6 +271,10 @@ class VM:
         return self.globals
 
     def _call_value(self, callee: Any, args: list[Any], line: int, col: int) -> Any:
+        if isinstance(callee, ZenInstance):
+            m = callee.klass.find_method("__call__")
+            if m is not None:
+                return m.call(self, args, line, col, bound_self=callee)  # type: ignore[arg-type]
         if isinstance(callee, (ZenBuiltin, VMClosure, VMBoundMethod, VMClass)):
             return callee.call(self, args, line, col)  # type: ignore[arg-type]
         raise ZenRuntimeError(f"Value of type '{zen_type(callee)}' is not callable", line, col)
@@ -333,6 +361,18 @@ class VM:
                             raise ZenRuntimeError("Map key cannot be a list or map", lines[cur_ip], cols[cur_ip])
                         m[k] = items[i + 1]
                 push(m)
+            elif op == _OP_BUILD_TUPLE:
+                if arg == 0:
+                    push(())
+                else:
+                    items = tuple(stack[-arg:])
+                    del stack[-arg:]
+                    push(items)
+            elif op == _OP_BUILD_SLICE:
+                step = pop()
+                stop = pop()
+                start = pop()
+                push(slice(start, stop, step))
             elif op == _OP_GET_INDEX:
                 idx = pop()
                 container = pop()
@@ -344,10 +384,12 @@ class VM:
                 self._set_index(container, idx, val, lines[cur_ip], cols[cur_ip])
             elif op == _OP_GET_MEMBER:
                 obj = pop()
-                if isinstance(obj, (ZenInstance, ZenModule)):
+                if isinstance(obj, (ZenInstance, ZenModule, ZenClass)):
                     push(obj.get(arg, lines[cur_ip], cols[cur_ip]))
                 elif isinstance(obj, ZenTensor):
                     push(self._tensor_member(obj, arg, lines[cur_ip], cols[cur_ip]))
+                elif isinstance(obj, ZenArray):
+                    push(self._array_member(obj, arg, lines[cur_ip], cols[cur_ip]))
                 else:
                     raise ZenRuntimeError(
                         f"Cannot access member '{arg}' on '{zen_type(obj)}'",
@@ -370,10 +412,15 @@ class VM:
                 if arg == "not":
                     push(not is_truthy(val))
                 elif arg == "-":
-                    if isinstance(val, ZenInstance) and "__neg__" in val.klass.methods:
-                        push(val.klass.methods["__neg__"].call(self, [], lines[cur_ip], cols[cur_ip], bound_self=val))  # type: ignore[arg-type]
-                    elif isinstance(val, ZenTensor):
+                    if isinstance(val, ZenInstance):
+                        neg_m = val.klass.find_method("__neg__")
+                        if neg_m is not None:
+                            push(neg_m.call(self, [], lines[cur_ip], cols[cur_ip], bound_self=val))  # type: ignore[arg-type]
+                            continue
+                    if isinstance(val, ZenTensor):
                         push(val.mul(-1.0))
+                    elif isinstance(val, ZenArray):
+                        push(val.neg())
                     elif _is_number(val):
                         push(-val)
                     else:
@@ -433,6 +480,8 @@ class VM:
                     push(iter(list(iterable)))
                 elif isinstance(iterable, (list, range)):
                     push(iter(iterable))
+                elif isinstance(iterable, ZenArray):
+                    push(iter(iterable.get_item(i) for i in range(iterable.shape[0])))
                 elif isinstance(iterable, dict):
                     push(iter(iterable.keys()))
                 else:
@@ -449,29 +498,41 @@ class VM:
                     pop()
                     ip = arg
             elif op == _OP_MAKE_CLOSURE:
+                nd = arg.num_defaults
+                if nd:
+                    def_vals = tuple(stack[-nd:])
+                    del stack[-nd:]
+                else:
+                    def_vals = ()
                 ups = tuple(
                     locals_arr[idx] if is_local else upvalues[idx]
                     for is_local, idx in arg.upvalues
                 )
-                push(VMClosure(arg, ups, globals_env))
+                push(VMClosure(arg, ups, globals_env, def_vals))
             elif op == _OP_CALL:
                 call_args = stack[-arg:] if arg else []
                 if arg:
                     del stack[-arg:]
                 callee = pop()
-                if type(callee) is VMClosure and arg == len(callee.code.params):
+                if type(callee) is VMClosure and arg == len(callee.code.params) and callee.code.num_defaults == 0:
                     push(self._execute_code(callee.code, callee.upvalues, call_args, callee.globals_env))
                 else:
                     push(self._call_value(callee, call_args, lines[cur_ip], cols[cur_ip]))
             elif op == _OP_RETURN:
                 return pop() if stack else None
             elif op == _OP_BUILD_CLASS:
-                cls_name, method_names = arg
+                cls_name, method_names, has_super = arg
+                sup_cls: ZenClass | None = None
+                if has_super:
+                    sup_val = pop()
+                    if not isinstance(sup_val, ZenClass):
+                        raise ZenRuntimeError("Superclass must be a class", lines[cur_ip], cols[cur_ip])
+                    sup_cls = sup_val
                 n_m = len(method_names)
                 closures = stack[-n_m:] if n_m else []
                 if n_m:
                     del stack[-n_m:]
-                push(VMClass(cls_name, dict(zip(method_names, closures))))
+                push(VMClass(cls_name, dict(zip(method_names, closures)), sup_cls))
             elif op == _OP_IMPORT:
                 path_str, alias = arg
                 self._exec_import(path_str, alias, lines[cur_ip], cols[cur_ip])
@@ -499,16 +560,16 @@ class VM:
         else:
             mod_vm = VM(stdout=self.stdout, base_dir=target.parent)
             mod_vm._module_cache = self._module_cache
-            for k, binding in self.globals.values.items():
-                if isinstance(binding.value, ZenBuiltin):
-                    mod_vm.globals.define(k, binding.value)
+            for k, bval in self._builtin_values.items():
+                mod_vm.globals.define(k, bval)
             mod_env = mod_vm.run_file(target)
             exports = {
                 k: b.value
                 for k, b in mod_env.values.items()
-                if not isinstance(b.value, ZenBuiltin)
+                if b.value is not self._builtin_values.get(k)
             }
-            module = ZenModule(target.stem, exports)
+            mod_name = target.parent.name if target.stem == "__init__" else target.stem
+            module = ZenModule(mod_name, exports)
             self._module_cache[target] = module
 
         if alias:
@@ -518,11 +579,19 @@ class VM:
                 self.globals.define(k, v)
 
     def _get_index(self, container: Any, idx: Any, line: int, col: int) -> Any:
+        if isinstance(container, ZenInstance):
+            m = container.klass.find_method("__getitem__")
+            if m is not None:
+                return m.call(self, [idx], line, col, bound_self=container)  # type: ignore[arg-type]
+        if isinstance(container, ZenArray):
+            return container.get_item(idx)
         if isinstance(container, ZenTensor):
             if not isinstance(idx, int) or isinstance(idx, bool):
                 raise ZenRuntimeError("Tensor index must be an integer", line, col)
             return container.get_index(idx)
         if isinstance(container, (list, str)):
+            if isinstance(idx, slice):
+                return container[idx]
             if not isinstance(idx, int) or isinstance(idx, bool):
                 raise ZenRuntimeError("Index must be an integer", line, col)
             try:
@@ -536,7 +605,18 @@ class VM:
         raise ZenRuntimeError(f"Cannot index into '{zen_type(container)}'", line, col)
 
     def _set_index(self, container: Any, idx: Any, value: Any, line: int, col: int) -> None:
+        if isinstance(container, ZenInstance):
+            m = container.klass.find_method("__setitem__")
+            if m is not None:
+                m.call(self, [idx, value], line, col, bound_self=container)  # type: ignore[arg-type]
+                return
+        if isinstance(container, ZenArray):
+            container.set_item(idx, value)
+            return
         if isinstance(container, list):
+            if isinstance(idx, slice):
+                container[idx] = value
+                return
             if not isinstance(idx, int) or isinstance(idx, bool):
                 raise ZenRuntimeError("List index must be an integer", line, col)
             try:
@@ -548,6 +628,45 @@ class VM:
             container[idx] = value
             return
         raise ZenRuntimeError(f"Cannot assign by index on '{zen_type(container)}'", line, col)
+
+    def _array_member(self, a: ZenArray, member: str, line: int, col: int) -> Any:
+        if member == "shape":
+            return list(a.shape)
+        if member == "dtype":
+            return a.dtype
+        if member == "ndim":
+            return a.ndim
+        if member == "size":
+            return a.size
+        if member == "T":
+            return a.transpose()
+        if member == "tolist":
+            return ZenBuiltin("tolist", a.tolist)
+        if member == "copy":
+            return ZenBuiltin("copy", a.copy)
+        if member == "astype":
+            return ZenBuiltin("astype", a.astype)
+        if member == "reshape":
+            return ZenBuiltin("reshape", a.reshape)
+        if member == "transpose":
+            return ZenBuiltin("transpose", a.transpose)
+        if member == "flatten":
+            return ZenBuiltin("flatten", a.flatten)
+        if member == "clip":
+            return ZenBuiltin("clip", a.clip)
+        if member in ("sum", "mean", "std", "var", "min", "max", "argmax", "argmin", "norm"):
+            return ZenBuiltin(member, lambda axis=None, keepdims=False, _m=member: a.reduce(_m, axis, bool(keepdims)))
+        if member == "sort":
+            return ZenBuiltin("sort", a.sort)
+        if member == "cumsum":
+            return ZenBuiltin("cumsum", a.cumsum)
+        if member == "dot":
+            return ZenBuiltin("dot", lambda b: a.matmul(ZenArray.from_list(b)))
+        if member == "all":
+            return ZenBuiltin("all", lambda: all(a.data))
+        if member == "any":
+            return ZenBuiltin("any", lambda: any(a.data))
+        raise ZenRuntimeError(f"Array has no member '{member}'", line, col)
 
     def _tensor_member(self, t: ZenTensor, member: str, line: int, col: int) -> Any:
         if member == "shape":
@@ -575,6 +694,40 @@ class VM:
         raise ZenRuntimeError(f"Tensor has no member '{member}'", line, col)
 
     def _binary_op(self, left: Any, op: str, right: Any, line: int, col: int) -> Any:
+        if op in _DUNDER_MAP:
+            d, rd = _DUNDER_MAP[op]
+            if isinstance(left, ZenInstance):
+                m = left.klass.find_method(d)
+                if m is not None:
+                    return m.call(self, [right], line, col, bound_self=left)  # type: ignore[arg-type]
+            if isinstance(right, ZenInstance):
+                rm = right.klass.find_method(rd)
+                if rm is not None:
+                    return rm.call(self, [left], line, col, bound_self=right)  # type: ignore[arg-type]
+
+        if isinstance(left, ZenArray) or isinstance(right, ZenArray):
+            if op in ("==", "!=") and (left is None or right is None or isinstance(left, (str, dict, ZenInstance, VMClosure, ZenModule, ZenClass, ZenBuiltin)) or isinstance(right, (str, dict, ZenInstance, VMClosure, ZenModule, ZenClass, ZenBuiltin))):
+                return False if op == "==" else True
+            if op in ("==", "!=", "<", "<=", ">", ">="):
+                if isinstance(left, ZenArray):
+                    return left.cmp(op, right)
+                flip = {"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!="}[op]
+                return right.cmp(flip, left)
+            if op == "@":
+                if isinstance(left, ZenArray) and isinstance(right, ZenArray):
+                    return left.matmul(right)
+                raise ZenRuntimeError("Matrix multiply '@' requires two arrays", line, col)
+            if op == "+":
+                return left.add(right) if isinstance(left, ZenArray) else right.add(left)
+            if op == "-":
+                return left.sub(right) if isinstance(left, ZenArray) else right.rsub(left)
+            if op == "*":
+                return left.mul(right) if isinstance(left, ZenArray) else right.mul(left)
+            if op == "/":
+                return left.div(right) if isinstance(left, ZenArray) else right.rdiv(left)
+            if op == "**":
+                return left.pow(right) if isinstance(left, ZenArray) else ZenArray.from_list(left).pow(right)
+
         if op == "==":
             if type(left) is bool or type(right) is bool:
                 return type(left) is type(right) and left == right
@@ -583,13 +736,6 @@ class VM:
             if type(left) is bool or type(right) is bool:
                 return not (type(left) is type(right) and left == right)
             return left != right
-
-        if op in _DUNDER_MAP:
-            d, rd = _DUNDER_MAP[op]
-            if isinstance(left, ZenInstance) and d in left.klass.methods:
-                return left.klass.methods[d].call(self, [right], line, col, bound_self=left)  # type: ignore[arg-type]
-            if isinstance(right, ZenInstance) and rd in right.klass.methods:
-                return right.klass.methods[rd].call(self, [left], line, col, bound_self=right)  # type: ignore[arg-type]
 
         if isinstance(left, ZenTensor) or isinstance(right, ZenTensor):
             if op == "@":

@@ -1,0 +1,6 @@
+import zennet as nn
+
+let x = nn.tensor([2.0, 3.0], true)
+let res = nn.no_grad(fn() { return x * 10.0 })
+say res.requires_grad
+say res.tolist()

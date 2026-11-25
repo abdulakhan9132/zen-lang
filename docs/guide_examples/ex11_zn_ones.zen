@@ -1,0 +1,4 @@
+import zennum as zn
+
+let a = zn.ones([3, 3]) * 5
+say a

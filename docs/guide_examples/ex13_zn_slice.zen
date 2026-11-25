@@ -1,0 +1,4 @@
+import zennum as zn
+
+let m = zn.arange(1, 10).reshape([3, 3])
+say m[1:, 1:]

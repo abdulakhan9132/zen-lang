@@ -1,0 +1,6 @@
+import zennum as zn
+
+let a = zn.arange(6).reshape([2, 3])
+say "shape = " + str(a.shape) + ", ndim = " + str(a.ndim) + ", size = " + str(a.size)
+say "transpose = " + str(a.T)
+say "flatten = " + str(zn.flatten(a))

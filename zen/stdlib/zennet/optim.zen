@@ -1,0 +1,236 @@
+// ZenNet Optimizers, Gradient Clipping, and Learning Rate Schedulers (pure ZEN)
+
+import zennum as zn
+
+let _PI = 3.141592653589793
+
+fn clip_grad_norm(params, max_norm) {
+    let total_sq = 0.0
+    for p in params {
+        if p.grad != none {
+            total_sq = total_sq + zn.sum(p.grad * p.grad)
+        }
+    }
+    let total_norm = sqrt(total_sq)
+    if total_norm > max_norm and total_norm > 0.0 {
+        let scale = max_norm / total_norm
+        for p in params {
+            if p.grad != none {
+                p.grad = p.grad * scale
+            }
+        }
+    }
+    return total_norm
+}
+
+class SGD {
+    fn init(self, params, lr = 0.01, momentum = 0.0, weight_decay = 0.0) {
+        self.params = params
+        self.lr = lr
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        self.velocities = []
+        let i = 0
+        while i < len(params) {
+            push(self.velocities, none)
+            i = i + 1
+        }
+    }
+
+    fn zero_grad(self) {
+        for p in self.params {
+            p.zero_grad()
+        }
+    }
+
+    fn step(self) {
+        let i = 0
+        while i < len(self.params) {
+            let p = self.params[i]
+            if p.grad != none {
+                let g = p.grad
+                if self.weight_decay > 0.0 {
+                    g = g + self.weight_decay * p.data
+                }
+                if self.momentum > 0.0 {
+                    let v = self.velocities[i]
+                    if v == none {
+                        v = zn.zeros(p.shape, "float64")
+                    }
+                    v = self.momentum * v + g
+                    self.velocities[i] = v
+                    p.set_data(p.data - self.lr * v)
+                } else {
+                    p.set_data(p.data - self.lr * g)
+                }
+            }
+            i = i + 1
+        }
+    }
+}
+
+class Adam {
+    fn init(self, params, lr = 0.001, betas = [0.9, 0.999], eps = 1e-8, weight_decay = 0.0) {
+        self.params = params
+        self.lr = lr
+        self.beta1 = betas[0]
+        self.beta2 = betas[1]
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self.t = 0
+        self.m = []
+        self.v = []
+        let i = 0
+        while i < len(params) {
+            push(self.m, none)
+            push(self.v, none)
+            i = i + 1
+        }
+    }
+
+    fn zero_grad(self) {
+        for p in self.params {
+            p.zero_grad()
+        }
+    }
+
+    fn step(self) {
+        self.t = self.t + 1
+        let b1_corr = 1.0 - pow(self.beta1, self.t)
+        let b2_corr = 1.0 - pow(self.beta2, self.t)
+        let i = 0
+        while i < len(self.params) {
+            let p = self.params[i]
+            if p.grad != none {
+                let g = p.grad
+                if self.weight_decay > 0.0 {
+                    g = g + self.weight_decay * p.data
+                }
+                let mi = self.m[i]
+                let vi = self.v[i]
+                if mi == none {
+                    mi = zn.zeros(p.shape, "float64")
+                    vi = zn.zeros(p.shape, "float64")
+                }
+                mi = self.beta1 * mi + (1.0 - self.beta1) * g
+                vi = self.beta2 * vi + (1.0 - self.beta2) * (g * g)
+                self.m[i] = mi
+                self.v[i] = vi
+                let m_hat = mi / b1_corr
+                let v_hat = vi / b2_corr
+                p.set_data(p.data - self.lr * m_hat / (zn.sqrt(v_hat) + self.eps))
+            }
+            i = i + 1
+        }
+    }
+}
+
+class AdamW {
+    fn init(self, params, lr = 0.001, betas = [0.9, 0.999], eps = 1e-8, weight_decay = 0.01) {
+        self.params = params
+        self.lr = lr
+        self.beta1 = betas[0]
+        self.beta2 = betas[1]
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self.t = 0
+        self.m = []
+        self.v = []
+        let i = 0
+        while i < len(params) {
+            push(self.m, none)
+            push(self.v, none)
+            i = i + 1
+        }
+    }
+
+    fn zero_grad(self) {
+        for p in self.params {
+            p.zero_grad()
+        }
+    }
+
+    fn step(self) {
+        self.t = self.t + 1
+        let b1_corr = 1.0 - pow(self.beta1, self.t)
+        let b2_corr = 1.0 - pow(self.beta2, self.t)
+        let i = 0
+        while i < len(self.params) {
+            let p = self.params[i]
+            if p.grad != none {
+                let g = p.grad
+                let mi = self.m[i]
+                let vi = self.v[i]
+                if mi == none {
+                    mi = zn.zeros(p.shape, "float64")
+                    vi = zn.zeros(p.shape, "float64")
+                }
+                mi = self.beta1 * mi + (1.0 - self.beta1) * g
+                vi = self.beta2 * vi + (1.0 - self.beta2) * (g * g)
+                self.m[i] = mi
+                self.v[i] = vi
+                let m_hat = mi / b1_corr
+                let v_hat = vi / b2_corr
+                let decayed = p.data * (1.0 - self.lr * self.weight_decay)
+                p.set_data(decayed - self.lr * m_hat / (zn.sqrt(v_hat) + self.eps))
+            }
+            i = i + 1
+        }
+    }
+}
+
+class StepLR {
+    fn init(self, optimizer, step_size, gamma = 0.1) {
+        self.optimizer = optimizer
+        self.step_size = step_size
+        self.gamma = gamma
+        self.last_epoch = 0
+    }
+
+    fn step(self) {
+        self.last_epoch = self.last_epoch + 1
+        if self.last_epoch % self.step_size == 0 {
+            self.optimizer.lr = self.optimizer.lr * self.gamma
+        }
+        return self.optimizer.lr
+    }
+}
+
+class CosineAnnealingLR {
+    fn init(self, optimizer, total_steps, min_lr = 0.0) {
+        self.optimizer = optimizer
+        self.base_lr = optimizer.lr
+        self.total_steps = total_steps
+        self.min_lr = min_lr
+        self.cur = 0
+    }
+
+    fn step(self) {
+        self.cur = self.cur + 1
+        let prog = self.cur / self.total_steps
+        if prog > 1.0 {
+            prog = 1.0
+        }
+        self.optimizer.lr = self.min_lr + 0.5 * (self.base_lr - self.min_lr) * (1.0 + cos(_PI * prog))
+        return self.optimizer.lr
+    }
+}
+
+class WarmupLR {
+    fn init(self, optimizer, warmup_steps) {
+        self.optimizer = optimizer
+        self.base_lr = optimizer.lr
+        self.warmup_steps = warmup_steps
+        self.cur = 0
+    }
+
+    fn step(self) {
+        self.cur = self.cur + 1
+        if self.cur <= self.warmup_steps {
+            self.optimizer.lr = self.base_lr * (self.cur / self.warmup_steps)
+        } else {
+            self.optimizer.lr = self.base_lr
+        }
+        return self.optimizer.lr
+    }
+}

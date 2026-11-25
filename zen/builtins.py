@@ -10,7 +10,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zen.errors import ZenRuntimeError
+from zen import native_kernels
 from zen.tensor import ZenTensor
+from zen.zennum_core import (
+    ZenArray,
+    arr_concat,
+    arr_outer,
+    arr_split,
+    arr_stack,
+    arr_where,
+)
 
 if TYPE_CHECKING:
     from zen.interpreter import Interpreter, ZenBuiltin
@@ -278,6 +287,135 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
         if not is_truthy(cond):
             raise ZenRuntimeError(str(message))
 
+    def _fields(obj: Any) -> dict[str, Any]:
+        from zen.interpreter import ZenInstance
+
+        if not isinstance(obj, ZenInstance):
+            raise ZenRuntimeError("'fields' expects a class instance")
+        return dict(obj.fields)
+
+    def _make_zennum_rt():
+        from zen.interpreter import ZenModule
+
+        def _wrap(name: str, fn: Any) -> Any:
+            return make_builtin(name, fn)
+
+        rt_exports = {
+            "array": _wrap("array", lambda data, dtype=None: ZenArray.from_list(data, dtype)),
+            "zeros": _wrap("zeros", lambda shape, dtype="float64": ZenArray.zeros(shape, dtype)),
+            "ones": _wrap("ones", lambda shape, dtype="float64": ZenArray.ones(shape, dtype)),
+            "full": _wrap("full", lambda shape, val, dtype=None: ZenArray.full(shape, val, dtype)),
+            "arange": _wrap("arange", lambda start, stop=None, step=1, dtype=None: ZenArray.arange(start, stop, step, dtype)),
+            "linspace": _wrap("linspace", lambda start, stop, num=50, dtype="float64": ZenArray.linspace(start, stop, num, dtype)),
+            "eye": _wrap("eye", lambda n, m=None, dtype="float64": ZenArray.eye(n, m, dtype)),
+            "rand": _wrap("rand", lambda shape, dtype="float64": ZenArray.rand(shape, rng, dtype)),
+            "randn": _wrap("randn", lambda shape, dtype="float64": ZenArray.randn(shape, rng, dtype)),
+            "seed": _wrap("seed", _seed),
+            "reshape": _wrap("reshape", lambda a, s: ZenArray.from_list(a).reshape(s)),
+            "transpose": _wrap("transpose", lambda a, axes=None: ZenArray.from_list(a).transpose(axes)),
+            "concat": _wrap("concat", lambda arrs, axis=0: arr_concat([ZenArray.from_list(x) for x in arrs], axis)),
+            "stack": _wrap("stack", lambda arrs, axis=0: arr_stack([ZenArray.from_list(x) for x in arrs], axis)),
+            "split": _wrap("split", lambda a, sec, axis=0: arr_split(ZenArray.from_list(a), sec, axis)),
+            "where": _wrap("where", lambda c, x, y: arr_where(ZenArray.from_list(c, "bool"), x, y)),
+            "clip": _wrap("clip", lambda a, lo, hi: ZenArray.from_list(a).clip(lo, hi)),
+            "abs": _wrap("abs", lambda a: ZenArray.from_list(a).unary_math("abs")),
+            "sqrt": _wrap("sqrt", lambda a: ZenArray.from_list(a).unary_math("sqrt")),
+            "exp": _wrap("exp", lambda a: ZenArray.from_list(a).unary_math("exp")),
+            "log": _wrap("log", lambda a: ZenArray.from_list(a).unary_math("log")),
+            "sin": _wrap("sin", lambda a: ZenArray.from_list(a).unary_math("sin")),
+            "cos": _wrap("cos", lambda a: ZenArray.from_list(a).unary_math("cos")),
+            "tanh": _wrap("tanh", lambda a: ZenArray.from_list(a).unary_math("tanh")),
+            "pow": _wrap("pow", lambda a, p: ZenArray.from_list(a).pow(p)),
+            "sum": _wrap("sum", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("sum", axis, bool(keepdims))),
+            "mean": _wrap("mean", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("mean", axis, bool(keepdims))),
+            "std": _wrap("std", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("std", axis, bool(keepdims))),
+            "var": _wrap("var", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("var", axis, bool(keepdims))),
+            "min": _wrap("min", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("min", axis, bool(keepdims))),
+            "max": _wrap("max", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("max", axis, bool(keepdims))),
+            "argmax": _wrap("argmax", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("argmax", axis, bool(keepdims))),
+            "argmin": _wrap("argmin", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("argmin", axis, bool(keepdims))),
+            "sort": _wrap("sort", lambda a, axis=-1: ZenArray.from_list(a).sort(axis)),
+            "cumsum": _wrap("cumsum", lambda a, axis=None: ZenArray.from_list(a).cumsum(axis)),
+            "dot": _wrap("dot", lambda a, b: ZenArray.from_list(a).matmul(ZenArray.from_list(b))),
+            "matmul": _wrap("matmul", lambda a, b: ZenArray.from_list(a).matmul(ZenArray.from_list(b))),
+            "outer": _wrap("outer", lambda a, b: arr_outer(ZenArray.from_list(a), ZenArray.from_list(b))),
+            "norm": _wrap("norm", lambda a, axis=None, keepdims=False: ZenArray.from_list(a).reduce("norm", axis, bool(keepdims))),
+            "gather": _wrap("gather", lambda table, idx: _arr_gather(ZenArray.from_list(table), idx)),
+            "scatter_add": _wrap("scatter_add", lambda shape, idx, vals: _arr_scatter_add(shape, idx, ZenArray.from_list(vals))),
+            "backend": native_kernels.NATIVE_BACKEND,
+        }
+        return ZenModule("_zennum_rt", rt_exports)
+
+    def _arr_gather(table: ZenArray, indices: Any) -> ZenArray:
+        if len(table.shape) < 1:
+            raise ZenRuntimeError("Cannot gather from 0D array")
+        n_rows = table.shape[0]
+        row_size = math.prod(table.shape[1:])
+        flat_idx: list[int] = []
+
+        def _collect(node: Any) -> tuple[int, ...]:
+            if isinstance(node, int) and not isinstance(node, bool):
+                idx = node + n_rows if node < 0 else node
+                if idx < 0 or idx >= n_rows:
+                    raise ZenRuntimeError(f"Gather index {node} out of bounds for size {n_rows}")
+                flat_idx.append(idx)
+                return ()
+            if isinstance(node, ZenArray):
+                return _collect(node.tolist())
+            if isinstance(node, list):
+                if not node:
+                    return (0,)
+                sub_s: tuple[int, ...] | None = None
+                for item in node:
+                    s = _collect(item)
+                    if sub_s is None:
+                        sub_s = s
+                    elif s != sub_s:
+                        raise ZenRuntimeError("Ragged index list in gather")
+                assert sub_s is not None
+                return (len(node),) + sub_s
+            raise ZenRuntimeError("Gather indices must be ints or nested lists")
+
+        idx_shape = _collect(indices)
+        out_vals: list[Any] = []
+        for idx in flat_idx:
+            start = idx * row_size
+            out_vals.extend(table.data[start : start + row_size])
+        from zen.zennum_core import _make_buffer
+        return ZenArray(_make_buffer(out_vals, table.dtype), idx_shape + table.shape[1:], table.dtype)
+
+    def _arr_scatter_add(target_shape: Any, indices: Any, values: ZenArray) -> ZenArray:
+        from zen.zennum_core import _normalize_shape, _zeros_buffer
+        s = _normalize_shape(target_shape)
+        n_rows = s[0]
+        row_size = math.prod(s[1:])
+        out = _zeros_buffer(math.prod(s), values.dtype)
+        flat_idx: list[int] = []
+
+        def _collect(node: Any) -> None:
+            if isinstance(node, int) and not isinstance(node, bool):
+                idx = node + n_rows if node < 0 else node
+                if idx < 0 or idx >= n_rows:
+                    raise ZenRuntimeError(f"Scatter index {node} out of bounds")
+                flat_idx.append(idx)
+            elif isinstance(node, ZenArray):
+                _collect(node.tolist())
+            elif isinstance(node, list):
+                for item in node:
+                    _collect(item)
+            else:
+                raise ZenRuntimeError("Scatter indices must be ints or nested lists")
+
+        _collect(indices)
+        if len(flat_idx) * row_size != values.size:
+            raise ZenRuntimeError("Scatter values size mismatch")
+        for pos, idx in enumerate(flat_idx):
+            dst = idx * row_size
+            src = pos * row_size
+            for k in range(row_size):
+                out[dst + k] += values.data[src + k]
+        return ZenArray(out, s, values.dtype)
+
     builtins: dict[str, Any] = {
         "range": _range,
         "push": _push,
@@ -353,8 +491,10 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
         "file_exists": _file_exists,
         "save_weights": _save_weights,
         "load_weights": _load_weights,
+        "fields": _fields,
         "clock": time.perf_counter,
     }
 
     for name, fn in builtins.items():
         interp.globals.define(name, make_builtin(name, fn))
+    interp.globals.define("_zennum_rt", _make_zennum_rt())

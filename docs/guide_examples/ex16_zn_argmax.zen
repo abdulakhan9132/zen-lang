@@ -1,0 +1,4 @@
+import zennum as zn
+
+let a = zn.array([10, 50, 20, 40])
+say "max = " + str(zn.max(a)) + ", argmax = " + str(zn.argmax(a))
