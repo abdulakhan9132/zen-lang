@@ -94,7 +94,7 @@ class GuideDocTemplate(BaseDocTemplate):
         canvas.line(0.75 * inch, h - 0.6 * inch, w - 0.75 * inch, h - 0.6 * inch)
         canvas.setFont("Helvetica", 8.5)
         canvas.setFillColor(TEXT_MUTED)
-        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.2.0)")
+        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.2.1)")
         canvas.drawRightString(w - 0.75 * inch, 0.45 * inch, f"Page {doc.page}")
         canvas.restoreState()
 
@@ -197,7 +197,7 @@ def build_pdf() -> int:
     story.append(Spacer(1, 0.55 * inch))
     story.append(
         Paragraph(
-            "Version 0.2.0<br/>By Abdullah Khan Suri",
+            "Version 0.2.1<br/>By Abdullah Khan Suri",
             ParagraphStyle("CoverMeta", fontName="Helvetica-Bold", fontSize=12, leading=18, textColor=PURPLE, alignment=TA_CENTER),
         )
     )
@@ -689,7 +689,7 @@ def build_pdf() -> int:
 
     # Chapter 24: Current Limitations and Roadmap
     story.append(Paragraph("24. Current limitations and roadmap", title_style))
-    story.append(Paragraph("What ZEN v0.2.0 can do today, and what is still planned for future versions.", one_liner_style))
+    story.append(Paragraph("What ZEN v0.2.1 can do today, and what is still planned for future versions.", one_liner_style))
     limits = [
         ("CPU-only execution:", "Pure-Python flat buffers run when no C compiler is present (~0.63s for 256x256 matmul; ~355 ms/step on a 2-layer d_model=16 GPT), with optional native C kernels (`zen/native/zen_kernels.c`). No GPU/CUDA yet."),
         ("Tiny GPT scale:", "Models and examples target low-RAM laptops using character/small-BPE corpora rather than large foundation models."),
@@ -699,7 +699,7 @@ def build_pdf() -> int:
         story.append(Paragraph(f"<b>{escape(head)}</b> {escape(body)}", note_style))
     story.append(Spacer(1, 8))
     story.append(Paragraph("Roadmap", subhead_style))
-    story.append(Paragraph("v0.2.0: Bytecode VM, static type checker, VS Code extension, ZenNum N-D arrays, ZenNet autograd/layers/GPT/optimizers/Trainer, and Learn-ZEN guide.", note_style))
+    story.append(Paragraph("v0.2.1: Bytecode VM, static type checker, VS Code extension, ZenNum N-D arrays, ZenNet autograd/layers/GPT/optimizers/Trainer, and Learn-ZEN guide.", note_style))
     story.append(Paragraph("Future: Prebuilt multi-platform native C wheels, GPU/SIMD backends, native compiler, and LSP.", note_style))
 
     PDF_OUT.parent.mkdir(parents=True, exist_ok=True)

@@ -29,15 +29,20 @@ class OptionalBuildExt(build_ext):
             print(f"[zen] Optional C kernel '{ext.name}' skipped ({exc}); using pure-Python fallback.")
 
 
-ext_modules = [
-    Extension(
-        "zen.native._zen_kernels",
-        sources=["zen/native/zen_kernels.c"],
-        extra_compile_args=[] if os.name == "nt" else ["-O3"],
-    )
-]
+ext_modules = (
+    [
+        Extension(
+            "zen.native._zen_kernels",
+            sources=["zen/native/zen_kernels.c"],
+            extra_compile_args=[] if os.name == "nt" else ["-O3"],
+        )
+    ]
+    if os.environ.get("ZEN_BUILD_NATIVE") == "1"
+    else []
+)
 
 setup(
+    version="0.2.1",
     ext_modules=ext_modules,
     cmdclass={"build_ext": OptionalBuildExt},
 )

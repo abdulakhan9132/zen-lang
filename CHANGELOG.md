@@ -2,6 +2,17 @@
 
 All notable changes to ZEN are documented in this file.
 
+## [0.2.1] - 2026-11-25
+
+### Fixed
+- **GPT Recipe (`examples/gpt_in_40_lines.zen`):** Tuned to train for 1000 steps in ~3 minutes on CPU (`183.31 ms/step`, loss `3.736 -> 1.973` < `2.5`), printing loss every 100 steps and generating real corpus words; added `QUICK = false` flag at the top for a ~19s 100-step preview.
+- **`nn.generate()` (`stdlib/zennet/train.zen`):** Guarded `top_k > 0` to prevent out-of-bounds indexing, handled empty prompts safely, restored `model.training` state after generation, and verified exact sentence memorization across `block_size` boundaries.
+
+### Changed
+- **Test Suite (`slow` marker):** Marked slow GPT training tests (`test_recipe_gpt_in_40_lines`, `test_generate_memorization`) with `@pytest.mark.slow` and configured `pyproject.toml` (`addopts = "-m 'not slow'"`) so plain `pytest` finishes in ~38s while `pytest -m slow` runs the full training tests.
+- **Universal Packaging:** Made the optional C kernel build opt-in (`ZEN_BUILD_NATIVE=1`) in `setup.py` so `python -m build` produces a universal `py3-none-any` wheel and sdist that install on any OS without a C compiler.
+- **Guide PDF:** Updated `docs/Learn-ZEN.pdf` (v0.2.1) Chapter 22.5 with live-captured output for both `QUICK = true` and `QUICK = false` GPT runs.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added
