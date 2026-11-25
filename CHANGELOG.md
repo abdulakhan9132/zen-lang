@@ -2,6 +2,12 @@
 
 All notable changes to ZEN are documented in this file.
 
+## [0.2.3] - 2026-11-25
+
+### Fixed
+- **CI Test Compatibility (`tests/test_vscode.py`):** Replaced top-level `from PIL import Image` with `pytest.importorskip("PIL")` inside `test_vscode_icon_dimensions()`, so `pytest` no longer fails collection when Pillow is not installed (no runtime dependency added; Pillow and tools moved to `[project.optional-dependencies] dev` in `pyproject.toml`).
+- **CI User-Folder Extension Test:** Updated `test_vscode_extension_installed_for_user()` to skip cleanly when `CI` is set or when `~/.vscode/extensions/zen-lang-0.1.0` does not exist, instead of requiring Windows `USERPROFILE` or a preinstalled local extension.
+
 ## [0.2.2] - 2026-11-25
 
 ### Added

@@ -2,7 +2,7 @@
   <img src="docs/zen-logo.png" alt="ZEN Logo" width="128" />
 </p>
 
-# ZEN (v0.2.2)
+# ZEN (v0.2.3)
 
 **ZEN is the language. ZenNum handles numbers. ZenNet builds neural networks.**
 

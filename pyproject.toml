@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zen-lang"
-version = "0.2.2"
+version = "0.2.3"
 description = "ZEN: A minimal programming language built from scratch for AI."
 readme = "README.md"
 license = "MIT"
@@ -25,6 +25,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Interpreters",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pillow", "reportlab", "build"]
 
 [project.urls]
 Repository = "https://github.com/abdulakhan9132/zen-lang"
