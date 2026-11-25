@@ -1,9 +1,6 @@
 name: Build Multi-Platform Wheels
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 jobs:
@@ -21,6 +18,7 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21
         env:
+          ZEN_BUILD_NATIVE: "1"
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
           CIBW_SKIP: "*-musllinux_* *-win32"
           CIBW_TEST_REQUIRES: "pytest"

@@ -205,10 +205,13 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
         e = None if end is None else int(_check_num(end, "slice"))
         return seq[s:e]
 
+    def _resolve_zen_path(path: str) -> Path:
+        return Path(path.replace("\\", "/"))
+
     def _read_file(path: Any) -> str:
         if not isinstance(path, str):
             raise ZenRuntimeError("'read_file' expects a path string")
-        p = Path(path)
+        p = _resolve_zen_path(path)
         if not p.is_file() and not p.is_absolute():
             alt = interp.base_dir / p
             if alt.is_file():
@@ -222,14 +225,18 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
 
         if not isinstance(path, str):
             raise ZenRuntimeError("'write_file' expects a path string")
-        p = Path(path)
+        p = _resolve_zen_path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content if isinstance(content, str) else zen_format(content), encoding="utf-8")
+        p.write_text(
+            content if isinstance(content, str) else zen_format(content),
+            encoding="utf-8",
+            newline="\n",
+        )
 
     def _file_exists(path: Any) -> bool:
         if not isinstance(path, str):
             raise ZenRuntimeError("'file_exists' expects a path string")
-        p = Path(path)
+        p = _resolve_zen_path(path)
         if p.is_file():
             return True
         if not p.is_absolute():
@@ -264,15 +271,15 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
     def _save_weights(path: Any, payload: Any) -> None:
         if not isinstance(path, str):
             raise ZenRuntimeError("'save_weights' expects a file path string")
-        p = Path(path)
+        p = _resolve_zen_path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         serialized = _serialize_weights(payload)
-        p.write_text(json.dumps(serialized), encoding="utf-8")
+        p.write_text(json.dumps(serialized), encoding="utf-8", newline="\n")
 
     def _load_weights(path: Any) -> Any:
         if not isinstance(path, str):
             raise ZenRuntimeError("'load_weights' expects a file path string")
-        p = Path(path)
+        p = _resolve_zen_path(path)
         if not p.is_file() and not p.is_absolute():
             alt = interp.base_dir / p
             if alt.is_file():

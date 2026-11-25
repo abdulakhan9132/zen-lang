@@ -44,3 +44,39 @@ def test_zen_guide_cli_path_and_fallback(monkeypatch: pytest.MonkeyPatch, capsys
     assert cli_main(["guide"]) == 0
     fallback_out = capsys.readouterr().out.strip()
     assert "Learn-ZEN.pdf" in fallback_out
+
+
+def test_zen_guide_cross_platform_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, object]] = []
+
+    def _fake_startfile(path: str) -> None:
+        calls.append(("startfile", path))
+
+    def _fake_run(cmd: list[str], check: bool = False):
+        calls.append(("subprocess", list(cmd)))
+        return None
+
+    monkeypatch.setattr("zen.cli.os.startfile", _fake_startfile, raising=False)
+    monkeypatch.setattr("zen.cli.subprocess.run", _fake_run)
+
+    monkeypatch.setattr("zen.cli.sys.platform", "win32")
+    assert cli_main(["guide"]) == 0
+    monkeypatch.setattr("zen.cli.sys.platform", "darwin")
+    assert cli_main(["guide"]) == 0
+    monkeypatch.setattr("zen.cli.sys.platform", "linux")
+    assert cli_main(["guide"]) == 0
+
+    assert calls[0][0] == "startfile"
+    assert calls[1] == ("subprocess", ["open", calls[0][1]])
+    assert calls[2] == ("subprocess", ["xdg-open", calls[0][1]])
+
+
+def test_zen_doctor_cli(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli_main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "ZEN version:" in out
+    assert "OS:" in out
+    assert "Python version:" in out
+    assert "Math backend:" in out
+    assert "Stdlib path:" in out
+    assert "Guide PDF path:" in out

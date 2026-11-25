@@ -22,6 +22,7 @@ class Lexer:
     """Scans ZEN source text into a sequence of Tokens with line and column info."""
 
     def __init__(self, source: str) -> None:
+        source = source.replace("\r\n", "\n").replace("\r", "\n")
         self.source = source
         self.length = len(source)
         self.pos = 0

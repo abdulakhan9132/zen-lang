@@ -1,6 +1,6 @@
 """ZEN language package (Phase 1+: Spec & Grammar definitions)."""
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 # Reserved keywords in the ZEN language.
 KEYWORDS = frozenset({

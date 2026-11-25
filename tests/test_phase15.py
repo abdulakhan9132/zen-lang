@@ -83,3 +83,19 @@ def test_zen_test_runs_tests_zen_directory(tmp_path: Path, capsys: pytest.Captur
 def test_phase15_example_runs(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli_main(["run", str(ROOT / "examples" / "phase15_tools.zen")]) == 0
     assert capsys.readouterr().out.strip() == "All Phase 15 checks passed: res = 42"
+
+
+def test_crlf_source_and_forward_slash_import(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    sub = tmp_path / "pkg"
+    sub.mkdir()
+    mod = sub / "helper.zen"
+    mod.write_bytes(b'fn greet() -> string {\r\n    return "ok"\r\n}\r\n')
+
+    main_file = tmp_path / "main.zen"
+    main_file.write_bytes(b'import "pkg/helper.zen" as h\r\nsay h.greet()\r\n')
+
+    assert cli_main(["run", str(main_file)]) == 0
+    assert capsys.readouterr().out.strip() == "ok"
+
+    assert cli_main(["fmt", str(mod)]) == 0
+    assert b"\r\n" not in mod.read_bytes()

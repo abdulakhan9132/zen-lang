@@ -11,22 +11,21 @@ from setuptools.command.build_ext import build_ext
 
 
 class OptionalBuildExt(build_ext):
-    """Build native math kernels when a C compiler exists; skip gracefully otherwise."""
+    """Build native math kernels when a C compiler exists; fall back silently otherwise."""
 
     def build_extensions(self) -> None:
         if os.environ.get("ZEN_SKIP_NATIVE_BUILD") == "1":
-            print("ZEN_SKIP_NATIVE_BUILD=1: skipping C kernel build; using pure-Python fallback.")
             return
         try:
             super().build_extensions()
-        except Exception as exc:
-            print(f"[zen] Optional C kernel compilation skipped ({exc}); using pure-Python fallback.")
+        except Exception:
+            return
 
     def build_extension(self, ext: Extension) -> None:
         try:
             super().build_extension(ext)
-        except Exception as exc:
-            print(f"[zen] Optional C kernel '{ext.name}' skipped ({exc}); using pure-Python fallback.")
+        except Exception:
+            return
 
 
 ext_modules = (
@@ -42,7 +41,7 @@ ext_modules = (
 )
 
 setup(
-    version="0.2.1",
+    version="0.2.2",
     ext_modules=ext_modules,
     cmdclass={"build_ext": OptionalBuildExt},
 )

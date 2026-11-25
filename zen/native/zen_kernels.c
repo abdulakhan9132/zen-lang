@@ -2,10 +2,16 @@
 #include <math.h>
 #include <stddef.h>
 
-#ifdef _WIN32
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#if defined(_WIN32) || defined(__CYGWIN__)
 #define ZEN_EXPORT __declspec(dllexport)
-#else
+#elif defined(__GNUC__) || defined(__clang__)
 #define ZEN_EXPORT __attribute__((visibility("default")))
+#else
+#define ZEN_EXPORT
 #endif
 
 #define ZEN_BLOCK 64
@@ -18,21 +24,27 @@ ZEN_EXPORT void zen_matmul_f64(
     int K,
     int N
 ) {
-    for (int i = 0; i < M * N; ++i) {
-        C[i] = 0.0;
+    int total = M * N;
+    for (int idx = 0; idx < total; ++idx) {
+        C[idx] = 0.0;
     }
-    for (int ii = 0; ii < M; ii += ZEN_BLOCK) {
+    int m_blocks = (M + ZEN_BLOCK - 1) / ZEN_BLOCK;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) if (M >= 32 && K >= 32 && N >= 32)
+#endif
+    for (int bi = 0; bi < m_blocks; ++bi) {
+        int ii = bi * ZEN_BLOCK;
         int i_end = ii + ZEN_BLOCK < M ? ii + ZEN_BLOCK : M;
         for (int kk = 0; kk < K; kk += ZEN_BLOCK) {
             int k_end = kk + ZEN_BLOCK < K ? kk + ZEN_BLOCK : K;
             for (int jj = 0; jj < N; jj += ZEN_BLOCK) {
                 int j_end = jj + ZEN_BLOCK < N ? jj + ZEN_BLOCK : N;
                 for (int i = ii; i < i_end; ++i) {
-                    const double *a_row = A + (size_t)i * K;
-                    double *c_row = C + (size_t)i * N;
+                    const double *a_row = A + (size_t)i * (size_t)K;
+                    double *c_row = C + (size_t)i * (size_t)N;
                     for (int k = kk; k < k_end; ++k) {
                         double a_ik = a_row[k];
-                        const double *b_row = B + (size_t)k * N;
+                        const double *b_row = B + (size_t)k * (size_t)N;
                         for (int j = jj; j < j_end; ++j) {
                             c_row[j] += a_ik * b_row[j];
                         }

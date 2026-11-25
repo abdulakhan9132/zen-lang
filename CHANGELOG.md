@@ -2,6 +2,16 @@
 
 All notable changes to ZEN are documented in this file.
 
+## [0.2.2] - 2026-11-25
+
+### Added
+- **`zen doctor` CLI command:** Prints ZEN version, OS, Python version, active math backend (native kernels vs pure-Python fallback), resolved stdlib path, and guide PDF path.
+- **Cross-Platform CI & Docs:** Added `.github/workflows/ci.yml` testing `ubuntu-latest`, `macos-latest`, and `windows-latest` across Python `3.10`–`3.13` (both default and `ZEN_NO_NATIVE=1`), switched `.github/workflows/wheels.yml` to manual `workflow_dispatch`, added `.gitattributes` (LF line endings for `.zen`/`.py`/`.c`), updated `README.md` with Ubuntu/Debian (PEP 668 `venv`/`pipx`), macOS, Windows, and WSL instructions, and added `docs/GPU_PLAN.md`.
+
+### Fixed
+- **Cross-Platform Lexer, Paths & Formatter:** Normalized CRLF (`\r\n`) line endings in `zen/lexer.py`, normalized `/` and `\` path handling in `zen/paths.py` (`resolve_import_path`, `resolve_stdlib_path`) and `zen/builtins.py`, enforced LF (`newline="\n"`) writes in `zen/formatter.py` and `zen/builtins.py`, and made `OptionalBuildExt` in `setup.py` fall back silently when C compilation fails.
+- **Portable Native Kernel (`zen/native/zen_kernels.c`):** Guarded GCC/Clang visibility attributes so non-GCC compilers work, and added optional OpenMP parallelization (`#ifdef _OPENMP`) in `zen_matmul_f64` using canonical loop bounds compatible with both MSVC and GCC/Clang while preserving `ZEN_NO_NATIVE=1`.
+
 ## [0.2.1] - 2026-11-25
 
 ### Fixed

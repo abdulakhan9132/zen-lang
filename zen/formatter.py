@@ -363,9 +363,9 @@ def format_file(path: str, *, check_only: bool = False) -> bool:
     from pathlib import Path
 
     p = Path(path)
-    original = p.read_text(encoding="utf-8")
-    formatted = format_source(original)
-    changed = original != formatted
+    raw_original = p.read_bytes().decode("utf-8")
+    formatted = format_source(raw_original.replace("\r\n", "\n").replace("\r", "\n"))
+    changed = raw_original != formatted
     if changed and not check_only:
-        p.write_text(formatted, encoding="utf-8")
+        p.write_bytes(formatted.encode("utf-8"))
     return changed

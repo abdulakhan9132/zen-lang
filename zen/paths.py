@@ -18,16 +18,24 @@ def resolve_guide_pdf_path() -> Path | None:
     return None
 
 
+def resolve_stdlib_path() -> Path | None:
+    """Return the active stdlib directory from the installed package or repo."""
+    for candidate in (_PKG_STDLIB, _REPO_STDLIB):
+        if candidate.is_dir():
+            return candidate.resolve()
+    return None
+
+
 def resolve_import_path(path_str: str, base_dir: Path) -> Path | None:
     """Resolve an imported .zen path relative to base_dir or packaged stdlib."""
-    raw = Path(path_str)
+    normalized = path_str.replace("\\", "/")
+    raw = Path(normalized)
     candidate = raw if raw.is_absolute() else (base_dir / raw)
     resolved = candidate.resolve()
     if resolved.is_file():
         return resolved
 
     # Fallback: resolve `pkg:...` (`import zennum`), `stdlib/...`, or `../stdlib/...`
-    normalized = path_str.replace("\\", "/")
     if normalized.startswith("pkg:"):
         pkg_parts = normalized[4:].split(".")
         candidates = [
