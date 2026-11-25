@@ -16,24 +16,17 @@ ZEN ships as a universal pure-Python wheel (`py3-none-any`) and source distribut
 
 ### Ubuntu / Debian (Linux)
 
-Modern Ubuntu/Debian systems enforce PEP 668 (`error: externally-managed-environment`) when running bare `pip install` against the system Python. Use a virtual environment or `pipx`:
+Modern Ubuntu/Debian systems enforce PEP 668 (`error: externally-managed-environment`) when running bare `pip install` against the system Python. Install globally with `pipx`:
 
-**Option A — `venv` (recommended for projects):**
+1. `sudo apt install -y pipx`
+2. `pipx ensurepath`
+3. Close and reopen the terminal.
+4. `pipx install <wheel URL>` (for example, `https://github.com/abdulakhan9132/zen-lang/releases/download/v0.2.3/zen_lang-0.2.3-py3-none-any.whl`)
+5. `zen doctor`
 
-```bash
-sudo apt update && sudo apt install -y python3 python3-venv python3-pip
-python3 -m venv ~/.venvs/zen
-source ~/.venvs/zen/bin/activate
-pip install zen-lang
-```
+If `zen` is not found, run `source ~/.bashrc` or open a new terminal.
 
-**Option B — `pipx` (for the global `zen` CLI):**
-
-```bash
-sudo apt update && sudo apt install -y pipx
-pipx ensurepath
-pipx install zen-lang
-```
+*(Or use a project `venv`: `sudo apt install -y python3 python3-venv && python3 -m venv ~/.venvs/zen && source ~/.venvs/zen/bin/activate && pip install <wheel URL>`.)*
 
 ### macOS
 
