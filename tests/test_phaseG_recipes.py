@@ -6,6 +6,8 @@ from io import StringIO
 from pathlib import Path
 from contextlib import redirect_stdout
 
+import pytest
+
 from zen.cli import main
 
 
@@ -43,6 +45,7 @@ def test_recipe_tiny_classifier():
     assert "Validation accuracy: 100.0%" in out
 
 
+@pytest.mark.slow
 def test_recipe_gpt_in_40_lines():
     p = REPO / "examples" / "gpt_in_40_lines.zen"
     lines = p.read_text(encoding="utf-8").splitlines()
@@ -72,6 +75,7 @@ def test_recipe_gpt_in_40_lines():
     )
 
 
+@pytest.mark.slow
 def test_generate_memorization(tmp_path):
     """Train a tiny GPT to memorize one short sentence and verify generate() reproduces it."""
     script = tmp_path / "memorize.zen"
