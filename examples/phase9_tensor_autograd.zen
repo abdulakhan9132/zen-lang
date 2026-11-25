@@ -1,0 +1,17 @@
+// Phase 9 example: Matrix Tensor Autograd written in ZEN.
+import "../stdlib/ai/tensor_autograd.zen" as ta
+
+let x = ta.from([[1.0, -2.0], [3.0, 0.5]])
+let w = ta.from([[0.5, 1.0], [-1.0, 2.0]])
+let b = ta.from([0.1, -0.2])
+
+let h = (x @ w + b).relu()
+let probs = h.softmax()
+let loss = (probs * ta.from([[1.0, 0.0], [0.0, 1.0]])).sum()
+
+loss.backward()
+
+say "h = " + str(h.data)
+say "loss = " + str(loss.data)
+say "dL/dw = " + str(w.grad)
+say "dL/db = " + str(b.grad)

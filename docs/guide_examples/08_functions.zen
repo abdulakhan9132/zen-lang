@@ -1,0 +1,14 @@
+fn add(x, y) {
+    return x + y
+}
+
+fn make_adder(base) {
+    fn inner(n) {
+        return base + n
+    }
+    return inner
+}
+
+let add10 = make_adder(10)
+say add(2, 3)
+say add10(5)

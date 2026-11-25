@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Testing & tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model checkpoints & temporary outputs
+*checkpoint*.json
+examples/data/*.json
+
+# VS Code extension build artifact
+*.vsix
+tools/vscode-zen/*.vsix

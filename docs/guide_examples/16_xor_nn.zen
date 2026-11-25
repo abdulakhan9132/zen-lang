@@ -1,0 +1,18 @@
+import "stdlib/ai/tensor_autograd.zen" as ta
+import "stdlib/ai/tensor_nn.zen" as tnn
+
+seed(42)
+let xs = ta.from([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+let ys = ta.from([[0.0], [1.0], [1.0], [0.0]])
+let net = tnn.TensorMLP([tnn.TensorLinear(2, 4, "tanh"), tnn.TensorLinear(4, 1, "sigmoid")])
+let opt = tnn.Adam(net.parameters(), 0.08)
+
+for epoch in range(100) {
+    let loss = tnn.tensor_mse_loss(net.forward(xs), ys)
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+    if epoch % 25 == 0 or epoch == 99 {
+        say "epoch " + str(epoch) + " | loss = " + str(round(loss.data.tolist(), 4))
+    }
+}

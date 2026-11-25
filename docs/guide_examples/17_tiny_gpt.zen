@@ -1,0 +1,26 @@
+import "stdlib/ai/tensor_nn.zen" as tnn
+import "stdlib/ai/tensor_gpt.zen" as lm
+
+seed(42)
+let text = read_file("examples/tiny.txt")
+let vocab = lm.build_vocab(text)
+let ids = lm.encode(text, vocab["stoi"])
+let model = lm.AutoCharGPT(vocab["size"], 6, 8)
+let opt = tnn.Adam(model.parameters(), 0.06)
+
+for step in range(40) {
+    let i = randint(0, len(ids) - 8)
+    let loss = model.compute_loss(slice(ids, i, i + 6), slice(ids, i + 1, i + 7))
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+    if step == 0 or step == 39 {
+        say "step " + str(step) + " | loss = " + str(round(loss.data.tolist(), 4))
+    }
+}
+
+model.save_checkpoint("docs/guide_examples/guide_checkpoint.json", 39, opt)
+let reloaded = lm.AutoCharGPT(vocab["size"], 6, 8)
+let saved_at = reloaded.load_checkpoint("docs/guide_examples/guide_checkpoint.json", none)
+say "loaded step = " + str(saved_at)
+say "sample: " + reloaded.generate(lm.encode("zen ", vocab["stoi"]), 24, vocab["itos"])

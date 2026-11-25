@@ -1,0 +1,15 @@
+for i in range(5) {
+    if i == 1 {
+        continue
+    }
+    if i == 4 {
+        break
+    }
+    say i
+}
+
+let n = 3
+while n > 0 {
+    say "countdown: " + str(n)
+    n = n - 1
+}

@@ -1,0 +1,40 @@
+{
+  "name": "zen-lang",
+  "displayName": "ZEN Language",
+  "description": "Syntax highlighting and language support for the ZEN AI programming language (.zen).",
+  "version": "0.1.0",
+  "publisher": "zen-lang",
+  "icon": "icons/zen.png",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "zen",
+        "aliases": [
+          "ZEN",
+          "zen"
+        ],
+        "extensions": [
+          ".zen"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/zen.png",
+          "dark": "./icons/zen.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "zen",
+        "scopeName": "source.zen",
+        "path": "./syntaxes/zen.tmLanguage.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+// Phase 12 benchmark program: tight loops, function calls, and XOR training.
+import "../stdlib/ai/tensor_autograd.zen" as ta
+import "../stdlib/ai/tensor_nn.zen" as tnn
+
+fn fib_iter(n) {
+    let a = 0
+    let b = 1
+    let i = 0
+    while i < n {
+        let tmp = a + b
+        a = b
+        b = tmp
+        i = i + 1
+    }
+    return a
+}
+
+let t0 = clock()
+let total = 0
+for round_idx in range(3000) {
+    total = total + fib_iter(25)
+}
+let loop_time = clock() - t0
+
+seed(42)
+let X = ta.from([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+let Y = ta.from([[0.0], [1.0], [1.0], [0.0]])
+let model = tnn.TensorMLP([tnn.TensorLinear(2, 4, "tanh"), tnn.TensorLinear(4, 1, "sigmoid")])
+let opt = tnn.Adam(model.parameters(), 0.08)
+
+let t1 = clock()
+let loss_val = 0.0
+for epoch in range(80) {
+    let loss = tnn.tensor_mse_loss(model.forward(X), Y)
+    loss_val = loss.data.tolist()
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+}
+let train_time = clock() - t1
+
+say "fib total = " + str(total) + " | loop_time = " + str(round(loop_time, 4)) + "s"
+say "xor loss = " + str(round(loss_val, 5)) + " | train_time = " + str(round(train_time, 4)) + "s"

@@ -1,0 +1,15 @@
+// ZEN self-test 4: Pure-Python tensor engine from .zen.
+let a = tensor([[1, 2], [3, 4]])
+let b = ones([2, 2]) * 2
+assert shape(a) == [2, 2]
+assert (a + b).tolist() == [[3.0, 4.0], [5.0, 6.0]]
+
+let prod = a @ transpose(a)
+assert prod.tolist() == [[5.0, 11.0], [11.0, 25.0]]
+assert sum(a) == 10.0
+assert mean(a) == 2.5
+assert max(a) == 4.0
+
+let r = reshape(a, [4])
+assert shape(r) == [4]
+assert round(sum(log(exp(a))), 6) == 10.0

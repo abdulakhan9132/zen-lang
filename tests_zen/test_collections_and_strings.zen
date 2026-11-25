@@ -1,0 +1,19 @@
+// ZEN self-test 3: lists, maps, strings, and higher-order helpers.
+let nums = [1, 2, 3, 4]
+push(nums, 5)
+assert pop(nums) == 5
+assert len(nums) == 4
+
+let doubled = map(nums, fn(x) { return x * 2 })
+let big = filter(doubled, fn(x) { return x > 4 })
+assert sum(big) == 14
+
+let m = {"a": 10, "b": 20}
+m["c"] = 30
+assert len(m) == 3
+assert m["a"] + m["c"] == 40
+
+let s = trim("  zen ai  ")
+assert upper(s) == "ZEN AI"
+assert join(split(s, " "), "-") == "zen-ai"
+assert contains(s, "ai")

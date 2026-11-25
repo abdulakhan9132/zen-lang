@@ -1,0 +1,6 @@
+let a = 10
+let b = 3
+say a + b, a - b, a * b, a / b, a % b
+say 2 ** 4
+say "Hello, " + "ZEN!"
+say a > b and b > 0

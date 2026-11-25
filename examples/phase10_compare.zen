@@ -1,0 +1,100 @@
+// Phase 10 example: XOR and Tiny GPT rewritten on Tensor Autograd + Adam,
+// compared against Phase 7 (scalar autograd) and Phase 8 (manual gradients).
+import "../stdlib/ai/nn.zen" as scalar_nn
+import "../stdlib/ai/tensor_autograd.zen" as ta
+import "../stdlib/ai/tensor_nn.zen" as tnn
+import "../stdlib/ai/char_lm.zen" as old_lm
+import "../stdlib/ai/tensor_gpt.zen" as auto_lm
+
+// 1. XOR Comparison: Scalar Value Autograd (SGD) vs Tensor Autograd (Adam)
+seed(42)
+let xs_list = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
+let ys_list = [0.0, 1.0, 1.0, 0.0]
+
+let old_mlp = scalar_nn.MLP([scalar_nn.Dense(2, 4, "tanh"), scalar_nn.Dense(4, 1, "sigmoid")])
+let old_opt = scalar_nn.SGD(old_mlp.parameters(), 0.8)
+let t0 = clock()
+let old_xor_loss = 0.0
+for epoch in range(200) {
+    let preds = []
+    for x in xs_list { push(preds, old_mlp.forward(x)) }
+    let loss = scalar_nn.mse_loss(preds, ys_list)
+    old_xor_loss = loss.data
+    old_opt.zero_grad()
+    loss.backward()
+    old_opt.step()
+}
+let old_xor_time = round(clock() - t0, 3)
+
+seed(42)
+let X_t = ta.from(xs_list)
+let Y_t = ta.from([[0.0], [1.0], [1.0], [0.0]])
+let new_mlp = tnn.TensorMLP([tnn.TensorLinear(2, 4, "tanh"), tnn.TensorLinear(4, 1, "sigmoid")])
+let adam_xor = tnn.Adam(new_mlp.parameters(), 0.08)
+let t1 = clock()
+let new_xor_first = 0.0
+let new_xor_loss = 0.0
+for epoch in range(120) {
+    let pred = new_mlp.forward(X_t)
+    let loss = tnn.tensor_mse_loss(pred, Y_t)
+    if epoch == 0 { new_xor_first = loss.data.tolist() }
+    new_xor_loss = loss.data.tolist()
+    adam_xor.zero_grad()
+    loss.backward()
+    adam_xor.step()
+}
+let new_xor_time = round(clock() - t1, 3)
+
+say "XOR (old scalar SGD 200ep): loss=" + str(round(old_xor_loss, 4)) + " time=" + str(old_xor_time) + "s"
+say "XOR (new tensor Adam 120ep): loss=" + str(round(new_xor_first, 4)) + "->" + str(round(new_xor_loss, 4)) + " time=" + str(new_xor_time) + "s"
+
+// 2. Tiny GPT Comparison on examples/tiny.txt
+let text = read_file("examples/tiny.txt")
+let vocab = auto_lm.build_vocab(text)
+let data = auto_lm.encode(text, vocab["stoi"])
+const BLOCK = 6
+const DIM = 8
+const STEPS = 120
+
+seed(42)
+let old_gpt = old_lm.TinyCharGPT(vocab["size"], BLOCK, DIM)
+let t2 = clock()
+let old_gpt_loss = 0.0
+for step in range(STEPS) {
+    let idx = randint(0, len(data) - BLOCK - 1)
+    let x = []
+    let y = []
+    for k in range(BLOCK) {
+        push(x, data[idx + k])
+        push(y, data[idx + k + 1])
+    }
+    old_gpt_loss = old_gpt.train_step(x, y, 0.25)
+}
+let old_gpt_time = round(clock() - t2, 3)
+
+seed(42)
+let new_gpt = auto_lm.AutoCharGPT(vocab["size"], BLOCK, DIM)
+let adam_gpt = tnn.Adam(new_gpt.parameters(), 0.05)
+let t3 = clock()
+let new_gpt_first = 0.0
+let new_gpt_loss = 0.0
+for step in range(STEPS) {
+    let idx = randint(0, len(data) - BLOCK - 1)
+    let x = []
+    let y = []
+    for k in range(BLOCK) {
+        push(x, data[idx + k])
+        push(y, data[idx + k + 1])
+    }
+    let loss = new_gpt.compute_loss(x, y)
+    if step == 0 { new_gpt_first = loss.data.tolist() }
+    new_gpt_loss = loss.data.tolist()
+    adam_gpt.zero_grad()
+    loss.backward()
+    adam_gpt.step()
+}
+let new_gpt_time = round(clock() - t3, 3)
+
+say "GPT (old manual-grad 120 steps): loss=" + str(round(old_gpt_loss, 4)) + " time=" + str(old_gpt_time) + "s"
+say "GPT (new autograd Adam 120 steps): loss=" + str(round(new_gpt_first, 4)) + "->" + str(round(new_gpt_loss, 4)) + " time=" + str(new_gpt_time) + "s"
+say "sample: " + new_gpt.generate(auto_lm.encode("zen ", vocab["stoi"]), 32, vocab["itos"])

@@ -1,0 +1,82 @@
+// Phase 11 example: Train AutoCharGPT on a ~250 KB text file with mini-batches and train/val split.
+import "../stdlib/ai/tensor_nn.zen" as tnn
+import "../stdlib/ai/tensor_gpt.zen" as auto_lm
+
+seed(42)
+
+let text = read_file("examples/data/corpus.txt")
+let vocab = auto_lm.build_vocab(text)
+let data = auto_lm.encode(text, vocab["stoi"])
+let split_idx = int(len(data) * 0.9)
+let train_data = slice(data, 0, split_idx)
+let val_data = slice(data, split_idx, len(data))
+
+const BLOCK_SIZE = 12
+const BATCH_SIZE = 8
+const D_MODEL = 12
+const STEPS = 50
+const LR = 0.03
+
+fn get_batch(src_data, batch_size, block_size) {
+    let bx = []
+    let by = []
+    let max_start = len(src_data) - block_size - 1
+    for b in range(batch_size) {
+        let idx = randint(0, max_start)
+        push(bx, slice(src_data, idx, idx + block_size))
+        push(by, slice(src_data, idx + 1, idx + 1 + block_size))
+    }
+    return {"x": bx, "y": by}
+}
+
+fn eval_loss(model, src_data, n_batches, batch_size, block_size) {
+    let total = 0.0
+    for i in range(n_batches) {
+        let batch = get_batch(src_data, batch_size, block_size)
+        let loss = model.compute_loss(batch["x"], batch["y"])
+        total = total + loss.data.tolist()
+    }
+    return total / float(n_batches)
+}
+
+let model = auto_lm.AutoCharGPT(vocab["size"], BLOCK_SIZE, D_MODEL)
+let opt = tnn.Adam(model.parameters(), LR)
+
+say "dataset chars: " + str(len(data)) + " | vocab: " + str(vocab["size"]) + " | train: " + str(len(train_data)) + " | val: " + str(len(val_data))
+
+let init_val = eval_loss(model, val_data, 3, BATCH_SIZE, BLOCK_SIZE)
+say "initial val_loss = " + str(round(init_val, 4))
+
+let t0 = clock()
+let first_train = 0.0
+let last_train = 0.0
+
+for step in range(STEPS) {
+    let batch = get_batch(train_data, BATCH_SIZE, BLOCK_SIZE)
+    let loss = model.compute_loss(batch["x"], batch["y"])
+    let lval = loss.data.tolist()
+    if step == 0 {
+        first_train = lval
+    }
+    last_train = lval
+
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+
+    if step % 10 == 0 or step == STEPS - 1 {
+        let vloss = eval_loss(model, val_data, 2, BATCH_SIZE, BLOCK_SIZE)
+        say "step " + str(step) + " | train_loss = " + str(round(lval, 4)) + " | val_loss = " + str(round(vloss, 4))
+    }
+}
+
+let elapsed = clock() - t0
+let ms_per_step = round((elapsed / float(STEPS)) * 1000.0, 2)
+let final_val = eval_loss(model, val_data, 3, BATCH_SIZE, BLOCK_SIZE)
+
+say "total time: " + str(round(elapsed, 2)) + "s | time/step: " + str(ms_per_step) + " ms"
+say "final train_loss: " + str(round(last_train, 4)) + " | final val_loss: " + str(round(final_val, 4))
+
+let prompt = auto_lm.encode("The ", vocab["stoi"])
+say "generated:"
+say model.generate(prompt, 60, vocab["itos"])

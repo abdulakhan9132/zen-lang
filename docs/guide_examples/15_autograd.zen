@@ -1,0 +1,8 @@
+import "stdlib/ai/autograd.zen" as ag
+
+let x = ag.value(3.0)
+let y = x * x + 2.0 * x
+y.backward()
+
+say "y = " + str(y.data)
+say "dy/dx = " + str(x.grad)

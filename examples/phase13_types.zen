@@ -1,0 +1,18 @@
+// Phase 13 example: Optional type annotations and type inference in ZEN.
+const TITLE: string = "ZEN Type Checker"
+let count: int = 3
+let scale: float = 1.5
+
+fn multiply_add(a: int, b: int, offset: float) -> float {
+    let prod = a * b
+    return float(prod) + offset
+}
+
+// Unannotated function with inferred types
+fn greet(name) {
+    return "Hello, " + name
+}
+
+say TITLE
+say multiply_add(count, 4, scale)
+say greet("AI")

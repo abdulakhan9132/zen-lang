@@ -1,0 +1,17 @@
+// Phase 4 example: built-ins, math, strings, lists, file I/O, and import.
+import "math_helper.zen" as mh
+
+let nums = range(1, 6)
+let squares = map(nums, mh.square)
+let evens = filter(squares, fn(x) { return x % 2 == 0 })
+
+say "nums: " + str(nums)
+say "squares: " + str(squares)
+say "even squares: " + str(evens)
+say "sqrt(16) = " + str(sqrt(16))
+
+seed(42)
+say "seeded random = " + str(round(random(), 4))
+
+let msg = trim("  hello zen world  ")
+say join(split(upper(msg), " "), "-")

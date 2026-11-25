@@ -1,0 +1,10 @@
+// ZEN self-test 1: variables, constants, types, arithmetic, and assert.
+const FACTOR: int = 3
+let x: int = 4
+let y: float = 2.5
+
+assert x * FACTOR == 12, "multiplication failed"
+assert float(x) + y == 6.5, "float addition failed"
+assert 2 ** 3 ** 2 == 512, "power right-associativity failed"
+assert -2 ** 2 == -4, "unary vs power precedence failed"
+assert (true and not false) or false, "boolean logic failed"

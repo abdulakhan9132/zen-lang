@@ -1,0 +1,354 @@
+// Tiny character-level GPT (Causal Self-Attention + FFN) written completely in ZEN.
+
+fn build_vocab(text) {
+    let seen = {}
+    let chars_list = []
+    for ch in chars(text) {
+        if not contains(seen, ch) {
+            seen[ch] = true
+            push(chars_list, ch)
+        }
+    }
+    // Simple insertion sort so vocab order is deterministic
+    for i in range(1, len(chars_list)) {
+        let key = chars_list[i]
+        let j = i - 1
+        while j >= 0 and ord(chars_list[j]) > ord(key) {
+            chars_list[j + 1] = chars_list[j]
+            j = j - 1
+        }
+        chars_list[j + 1] = key
+    }
+    let stoi = {}
+    let itos = {}
+    for i in range(len(chars_list)) {
+        let c = chars_list[i]
+        stoi[c] = i
+        itos[i] = c
+    }
+    return {"chars": chars_list, "stoi": stoi, "itos": itos, "size": len(chars_list)}
+}
+
+fn encode(text, stoi) {
+    let ids = []
+    for ch in chars(text) {
+        push(ids, stoi[ch])
+    }
+    return ids
+}
+
+fn decode(ids, itos) {
+    let out = []
+    for idx in ids {
+        push(out, itos[idx])
+    }
+    return join(out, "")
+}
+
+fn _causal_softmax_2d(scores_list) {
+    let T = len(scores_list)
+    let probs = []
+    for i in range(T) {
+        let row = scores_list[i]
+        let max_v = row[0]
+        for j in range(1, i + 1) {
+            if row[j] > max_v {
+                max_v = row[j]
+            }
+        }
+        let exps = []
+        let total = 0.0
+        for j in range(T) {
+            if j <= i {
+                let e = exp(row[j] - max_v)
+                push(exps, e)
+                total = total + e
+            } else {
+                push(exps, 0.0)
+            }
+        }
+        let p_row = []
+        for j in range(T) {
+            push(p_row, exps[j] / total)
+        }
+        push(probs, p_row)
+    }
+    return probs
+}
+
+fn _causal_softmax_backward(attn_list, d_attn_list) {
+    let T = len(attn_list)
+    let d_scores = []
+    for i in range(T) {
+        let a_row = attn_list[i]
+        let da_row = d_attn_list[i]
+        let dot = 0.0
+        for j in range(i + 1) {
+            dot = dot + a_row[j] * da_row[j]
+        }
+        let ds_row = []
+        for j in range(T) {
+            if j <= i {
+                push(ds_row, a_row[j] * (da_row[j] - dot))
+            } else {
+                push(ds_row, 0.0)
+            }
+        }
+        push(d_scores, ds_row)
+    }
+    return tensor(d_scores)
+}
+
+fn _softmax_row(row) {
+    let max_v = row[0]
+    for j in range(1, len(row)) {
+        if row[j] > max_v {
+            max_v = row[j]
+        }
+    }
+    let exps = []
+    let total = 0.0
+    for v in row {
+        let e = exp(v - max_v)
+        push(exps, e)
+        total = total + e
+    }
+    let probs = []
+    for e in exps {
+        push(probs, e / total)
+    }
+    return probs
+}
+
+fn _relu_2d(t) {
+    let rows = t.tolist()
+    let out = []
+    for r in rows {
+        let nr = []
+        for v in r {
+            if v > 0.0 {
+                push(nr, v)
+            } else {
+                push(nr, 0.0)
+            }
+        }
+        push(out, nr)
+    }
+    return tensor(out)
+}
+
+fn _relu_mask_2d(z_t, grad_t) {
+    let z = z_t.tolist()
+    let g = grad_t.tolist()
+    let out = []
+    for i in range(len(z)) {
+        let row = []
+        for j in range(len(z[i])) {
+            if z[i][j] > 0.0 {
+                push(row, g[i][j])
+            } else {
+                push(row, 0.0)
+            }
+        }
+        push(out, row)
+    }
+    return tensor(out)
+}
+
+class TinyCharGPT {
+    fn init(self, vocab_size, block_size, d_model) {
+        self.vocab_size = vocab_size
+        self.block_size = block_size
+        self.d_model = d_model
+        let ff_dim = d_model * 2
+        let s = 0.2
+
+        self.tok_emb = (randn([vocab_size, d_model]) * s).tolist()
+        self.pos_emb = (randn([block_size, d_model]) * s).tolist()
+
+        self.Wq = randn([d_model, d_model]) * s
+        self.Wk = randn([d_model, d_model]) * s
+        self.Wv = randn([d_model, d_model]) * s
+        self.Wo = randn([d_model, d_model]) * s
+
+        self.W1 = randn([d_model, ff_dim]) * s
+        self.b1 = zeros([ff_dim])
+        self.W2 = randn([ff_dim, d_model]) * s
+        self.b2 = zeros([d_model])
+
+        self.Wout = randn([d_model, vocab_size]) * s
+        self.bout = zeros([vocab_size])
+    }
+
+    fn forward_logits(self, ids) {
+        let T = len(ids)
+        let D = self.d_model
+        let x_rows = []
+        for t in range(T) {
+            let tid = ids[t]
+            let row = []
+            for d in range(D) {
+                push(row, self.tok_emb[tid][d] + self.pos_emb[t][d])
+            }
+            push(x_rows, row)
+        }
+        let X = tensor(x_rows)
+        let scale = 1.0 / sqrt(float(D))
+
+        let Q = X @ self.Wq
+        let K = X @ self.Wk
+        let V = X @ self.Wv
+
+        let scores = (Q @ K.T) * scale
+        let attn_list = _causal_softmax_2d(scores.tolist())
+        let attn = tensor(attn_list)
+        let attn_out = attn @ V
+        let proj = attn_out @ self.Wo
+        let H1 = X + proj
+
+        let z1 = H1 @ self.W1 + self.b1
+        let a1 = _relu_2d(z1)
+        let ff = a1 @ self.W2 + self.b2
+        let H2 = H1 + ff
+
+        let logits = H2 @ self.Wout + self.bout
+        return {
+            "X": X,
+            "Q": Q,
+            "K": K,
+            "V": V,
+            "attn_list": attn_list,
+            "attn": attn,
+            "attn_out": attn_out,
+            "H1": H1,
+            "z1": z1,
+            "a1": a1,
+            "H2": H2,
+            "logits": logits,
+        }
+    }
+
+    fn train_step(self, input_ids, target_ids, lr) {
+        let cache = self.forward_logits(input_ids)
+        let logits_list = cache["logits"].tolist()
+        let T = len(input_ids)
+        let inv_T = 1.0 / float(T)
+
+        let loss = 0.0
+        let dlogits_rows = []
+        for t in range(T) {
+            let probs = _softmax_row(logits_list[t])
+            let tgt = target_ids[t]
+            loss = loss - log(probs[tgt] + 1e-9) * inv_T
+            let grad_row = []
+            for v in range(self.vocab_size) {
+                let g = probs[v]
+                if v == tgt {
+                    g = g - 1.0
+                }
+                push(grad_row, g * inv_T)
+            }
+            push(dlogits_rows, grad_row)
+        }
+        let dlogits = tensor(dlogits_rows)
+
+        // LM head backward
+        let H2 = cache["H2"]
+        let dWout = H2.T @ dlogits
+        let dbout = tensor_sum(dlogits, 0)
+        let dH2 = dlogits @ self.Wout.T
+
+        // FFN backward
+        let a1 = cache["a1"]
+        let z1 = cache["z1"]
+        let H1 = cache["H1"]
+        let dW2 = a1.T @ dH2
+        let db2 = tensor_sum(dH2, 0)
+        let da1 = dH2 @ self.W2.T
+        let dz1 = _relu_mask_2d(z1, da1)
+        let dW1 = H1.T @ dz1
+        let db1 = tensor_sum(dz1, 0)
+        let dH1 = dH2 + (dz1 @ self.W1.T)
+
+        // Causal Self-Attention backward
+        let attn_out = cache["attn_out"]
+        let attn = cache["attn"]
+        let V = cache["V"]
+        let K = cache["K"]
+        let Q = cache["Q"]
+        let X = cache["X"]
+        let scale = 1.0 / sqrt(float(self.d_model))
+
+        let dWo = attn_out.T @ dH1
+        let d_attn_out = dH1 @ self.Wo.T
+        let d_attn = d_attn_out @ V.T
+        let dV = attn.T @ d_attn_out
+        let d_scores = _causal_softmax_backward(cache["attn_list"], d_attn.tolist()) * scale
+        let dQ = d_scores @ K
+        let dK = d_scores.T @ Q
+
+        let dWq = X.T @ dQ
+        let dWk = X.T @ dK
+        let dWv = X.T @ dV
+        let dX = dH1 + (dQ @ self.Wq.T) + (dK @ self.Wk.T) + (dV @ self.Wv.T)
+
+        // SGD parameter updates
+        self.Wout = self.Wout - dWout * lr
+        self.bout = self.bout - dbout * lr
+        self.W2 = self.W2 - dW2 * lr
+        self.b2 = self.b2 - db2 * lr
+        self.W1 = self.W1 - dW1 * lr
+        self.b1 = self.b1 - db1 * lr
+        self.Wo = self.Wo - dWo * lr
+        self.Wq = self.Wq - dWq * lr
+        self.Wk = self.Wk - dWk * lr
+        self.Wv = self.Wv - dWv * lr
+
+        let dX_list = dX.tolist()
+        for t in range(T) {
+            let tid = input_ids[t]
+            for d in range(self.d_model) {
+                let g = dX_list[t][d] * lr
+                self.tok_emb[tid][d] = self.tok_emb[tid][d] - g
+                self.pos_emb[t][d] = self.pos_emb[t][d] - g
+            }
+        }
+
+        return loss
+    }
+
+    fn generate(self, start_ids, max_new_tokens, itos) {
+        let ids = []
+        for idx in start_ids {
+            push(ids, idx)
+        }
+        for step in range(max_new_tokens) {
+            let start = len(ids) - self.block_size
+            if start < 0 {
+                start = 0
+            }
+            let ctx = []
+            for i in range(start, len(ids)) {
+                push(ctx, ids[i])
+            }
+            let cache = self.forward_logits(ctx)
+            let logits_list = cache["logits"].tolist()
+            let last_logits = logits_list[len(logits_list) - 1]
+            let probs = _softmax_row(last_logits)
+
+            // Sample from probability distribution
+            let r = random()
+            let cum = 0.0
+            let next_id = len(probs) - 1
+            for v in range(len(probs)) {
+                cum = cum + probs[v]
+                if r <= cum {
+                    next_id = v
+                    break
+                }
+            }
+            push(ids, next_id)
+        }
+        return decode(ids, itos)
+    }
+}

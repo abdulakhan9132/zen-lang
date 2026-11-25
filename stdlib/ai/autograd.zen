@@ -1,0 +1,197 @@
+// Reverse-mode automatic differentiation (micrograd-style) written in ZEN.
+
+let _next_value_id = 0
+
+fn _new_id() {
+    _next_value_id = _next_value_id + 1
+    return _next_value_id
+}
+
+fn _noop() {
+    return none
+}
+
+class Value {
+    fn init(self, data, children, op) {
+        self._id = _new_id()
+        self.data = float(data)
+        self.grad = 0.0
+        self._prev = children
+        self._op = op
+        self._backward = _noop
+    }
+
+    fn __neg__(self) {
+        return self.__mul__(-1.0)
+    }
+
+    fn __add__(self, other) {
+        let b = ensure_value(other)
+        let out = Value(self.data + b.data, [self, b], "+")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + out.grad
+            b.grad = b.grad + out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __radd__(self, other) {
+        return self.__add__(other)
+    }
+
+    fn __sub__(self, other) {
+        let b = ensure_value(other)
+        let out = Value(self.data - b.data, [self, b], "-")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + out.grad
+            b.grad = b.grad - out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __rsub__(self, other) {
+        return ensure_value(other).__sub__(self)
+    }
+
+    fn __mul__(self, other) {
+        let b = ensure_value(other)
+        let out = Value(self.data * b.data, [self, b], "*")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + b.data * out.grad
+            b.grad = b.grad + a.data * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __rmul__(self, other) {
+        return self.__mul__(other)
+    }
+
+    fn __truediv__(self, other) {
+        let b = ensure_value(other)
+        let out = Value(self.data / b.data, [self, b], "/")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (1.0 / b.data) * out.grad
+            b.grad = b.grad + (-a.data / (b.data * b.data)) * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __rtruediv__(self, other) {
+        return ensure_value(other).__truediv__(self)
+    }
+
+    fn __pow__(self, power) {
+        let out = Value(self.data ** power, [self], "**")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (power * (a.data ** (power - 1.0))) * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn relu(self) {
+        let val = 0.0
+        if self.data > 0.0 {
+            val = self.data
+        }
+        let out = Value(val, [self], "relu")
+        let a = self
+        fn _bw() {
+            if out.data > 0.0 {
+                a.grad = a.grad + out.grad
+            }
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn tanh(self) {
+        let t = tanh(self.data)
+        let out = Value(t, [self], "tanh")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (1.0 - t * t) * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn sigmoid(self) {
+        let s = 1.0 / (1.0 + exp(-self.data))
+        let out = Value(s, [self], "sigmoid")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + s * (1.0 - s) * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn exp(self) {
+        let e = exp(self.data)
+        let out = Value(e, [self], "exp")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + e * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn log(self) {
+        let out = Value(log(self.data), [self], "log")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (1.0 / a.data) * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn backward(self) {
+        let topo = []
+        let visited = {}
+
+        fn build_topo(v) {
+            if contains(visited, v._id) {
+                return none
+            }
+            visited[v._id] = true
+            for child in v._prev {
+                build_topo(child)
+            }
+            push(topo, v)
+        }
+
+        build_topo(self)
+        self.grad = 1.0
+
+        let i = len(topo) - 1
+        while i >= 0 {
+            let node = topo[i]
+            node._backward()
+            i = i - 1
+        }
+    }
+}
+
+fn value(x) {
+    return Value(x, [], "")
+}
+
+fn ensure_value(x) {
+    if type(x) == "Value" {
+        return x
+    }
+    return Value(x, [], "")
+}

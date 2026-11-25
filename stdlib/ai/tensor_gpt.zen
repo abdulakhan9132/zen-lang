@@ -1,0 +1,213 @@
+// Tiny character-level GPT rewritten on Tensor Autograd (no manual gradients).
+import "tensor_autograd.zen" as ta
+import "tensor_nn.zen" as tnn
+import "char_lm.zen" as vocab_mod
+
+fn build_vocab(text) {
+    return vocab_mod.build_vocab(text)
+}
+
+fn encode(text, stoi) {
+    return vocab_mod.encode(text, stoi)
+}
+
+fn decode(ids, itos) {
+    return vocab_mod.decode(ids, itos)
+}
+
+fn _make_causal_mask(size) {
+    let rows = []
+    for i in range(size) {
+        let row = []
+        for j in range(size) {
+            if j <= i {
+                push(row, 0.0)
+            } else {
+                push(row, -1e9)
+            }
+        }
+        push(rows, row)
+    }
+    return ta.from(rows)
+}
+
+class AutoCharGPT {
+    fn init(self, vocab_size, block_size, d_model) {
+        self.vocab_size = vocab_size
+        self.block_size = block_size
+        self.d_model = d_model
+        let ff_dim = d_model * 2
+        let s = 0.2
+
+        self.tok_emb = ta.from(randn([vocab_size, d_model]) * s)
+        self.pos_emb = ta.from(randn([block_size, d_model]) * s)
+
+        self.Wq = ta.from(randn([d_model, d_model]) * s)
+        self.Wk = ta.from(randn([d_model, d_model]) * s)
+        self.Wv = ta.from(randn([d_model, d_model]) * s)
+        self.Wo = ta.from(randn([d_model, d_model]) * s)
+
+        self.W1 = ta.from(randn([d_model, ff_dim]) * s)
+        self.b1 = ta.from(zeros([ff_dim]))
+        self.W2 = ta.from(randn([ff_dim, d_model]) * s)
+        self.b2 = ta.from(zeros([d_model]))
+
+        self.Wout = ta.from(randn([d_model, vocab_size]) * s)
+        self.bout = ta.from(zeros([vocab_size]))
+
+        self._full_mask = _make_causal_mask(block_size)
+        self._pos_idx = range(block_size)
+    }
+
+    fn parameters(self) {
+        return [
+            self.tok_emb,
+            self.pos_emb,
+            self.Wq,
+            self.Wk,
+            self.Wv,
+            self.Wo,
+            self.W1,
+            self.b1,
+            self.W2,
+            self.b2,
+            self.Wout,
+            self.bout,
+        ]
+    }
+
+    fn save_checkpoint(self, path, step, opt) {
+        let state = {
+            "step": step,
+            "weights": [
+                self.tok_emb.data,
+                self.pos_emb.data,
+                self.Wq.data,
+                self.Wk.data,
+                self.Wv.data,
+                self.Wo.data,
+                self.W1.data,
+                self.b1.data,
+                self.W2.data,
+                self.b2.data,
+                self.Wout.data,
+                self.bout.data,
+            ],
+            "adam_t": opt.t,
+            "adam_m": opt.m,
+            "adam_v": opt.v,
+        }
+        save_weights(path, state)
+    }
+
+    fn load_checkpoint(self, path, opt) {
+        let state = load_weights(path)
+        let w = state["weights"]
+        let params = self.parameters()
+        for i in range(len(params)) {
+            params[i].data = w[i]
+        }
+        if opt != none {
+            opt.t = state["adam_t"]
+            opt.m = state["adam_m"]
+            opt.v = state["adam_v"]
+        }
+        return state["step"]
+    }
+
+    fn forward_logits(self, input_ids) {
+        let batch_ids = input_ids
+        if type(input_ids[0]) == "int" {
+            batch_ids = [input_ids]
+        }
+        let B = len(batch_ids)
+        let T = len(batch_ids[0])
+
+        let pos_ids = self._pos_idx
+        let mask = self._full_mask
+        if T != self.block_size {
+            pos_ids = range(T)
+            mask = _make_causal_mask(T)
+        }
+
+        let X = self.tok_emb.gather(batch_ids) + self.pos_emb.gather(pos_ids)
+        let scale = 1.0 / sqrt(float(self.d_model))
+
+        let Q = X @ self.Wq
+        let K = X @ self.Wk
+        let V = X @ self.Wv
+        let K_t = K.transpose_axes([0, 2, 1])
+
+        let scores = (Q @ K_t) * scale + mask
+        let attn = scores.softmax()
+        let H1 = X + ((attn @ V) @ self.Wo)
+
+        let ff = (H1 @ self.W1 + self.b1).relu() @ self.W2 + self.b2
+        let H2 = H1 + ff
+        return H2 @ self.Wout + self.bout
+    }
+
+    fn compute_loss(self, input_ids, target_ids) {
+        let batch_x = input_ids
+        let batch_y = target_ids
+        if type(input_ids[0]) == "int" {
+            batch_x = [input_ids]
+            batch_y = [target_ids]
+        }
+        let B = len(batch_x)
+        let T = len(batch_x[0])
+        let logits = self.forward_logits(batch_x)
+        let logits_flat = logits.reshape([B * T, self.vocab_size])
+        let flat_y = []
+        for row in batch_y {
+            for idx in row {
+                push(flat_y, idx)
+            }
+        }
+        return tnn.tensor_cross_entropy(logits_flat, flat_y)
+    }
+
+    fn generate(self, start_ids, max_new_tokens, itos) {
+        let ids = []
+        for idx in start_ids {
+            push(ids, idx)
+        }
+        for step in range(max_new_tokens) {
+            let start = len(ids) - self.block_size
+            if start < 0 {
+                start = 0
+            }
+            let ctx = []
+            for i in range(start, len(ids)) {
+                push(ctx, ids[i])
+            }
+            let logits = self.forward_logits(ctx).data.tolist()
+            let last_logits = logits[0][len(ctx) - 1]
+
+            // Softmax on last_logits for sampling
+            let max_v = last_logits[0]
+            for v in last_logits {
+                if v > max_v { max_v = v }
+            }
+            let exps = []
+            let total = 0.0
+            for v in last_logits {
+                let e = exp(v - max_v)
+                push(exps, e)
+                total = total + e
+            }
+            let r = random()
+            let cum = 0.0
+            let next_id = len(exps) - 1
+            for v in range(len(exps)) {
+                cum = cum + exps[v] / total
+                if r <= cum {
+                    next_id = v
+                    break
+                }
+            }
+            push(ids, next_id)
+        }
+        return decode(ids, itos)
+    }
+}

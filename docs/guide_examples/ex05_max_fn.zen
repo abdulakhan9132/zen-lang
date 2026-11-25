@@ -1,0 +1,10 @@
+// Exercise 5: Write a typed function max_two(a: int, b: int) -> int.
+fn max_two(a: int, b: int) -> int {
+    if a >= b {
+        return a
+    }
+    return b
+}
+let m = max_two(9, 14)
+say m
+assert m == 14

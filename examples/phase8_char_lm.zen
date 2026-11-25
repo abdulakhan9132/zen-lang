@@ -1,0 +1,50 @@
+// Phase 8 example: Train a tiny character-level GPT in .zen on examples/tiny.txt and generate text.
+import "../stdlib/ai/char_lm.zen" as lm
+
+seed(42)
+
+let text = read_file("examples/tiny.txt")
+let vocab = lm.build_vocab(text)
+let data = lm.encode(text, vocab["stoi"])
+
+const BLOCK_SIZE = 6
+const D_MODEL = 8
+const STEPS = 260
+
+let model = lm.TinyCharGPT(vocab["size"], BLOCK_SIZE, D_MODEL)
+
+say "vocab size: " + str(vocab["size"]) + " | data chars: " + str(len(data))
+let t0 = clock()
+let first_loss = 0.0
+let last_loss = 0.0
+
+for step in range(STEPS) {
+    let lr = 0.25
+    if step > 130 {
+        lr = 0.12
+    }
+    let max_start = len(data) - BLOCK_SIZE - 1
+    let idx = randint(0, max_start)
+    let x = []
+    let y = []
+    for k in range(BLOCK_SIZE) {
+        push(x, data[idx + k])
+        push(y, data[idx + k + 1])
+    }
+    let loss = model.train_step(x, y, lr)
+    if step == 0 {
+        first_loss = loss
+    }
+    last_loss = loss
+    if step % 50 == 0 or step == STEPS - 1 {
+        say "step " + str(step) + " | loss = " + str(round(loss, 4))
+    }
+}
+
+let elapsed = round(clock() - t0, 2)
+say "training time: " + str(elapsed) + "s (start=" + str(round(first_loss, 3)) + " -> end=" + str(round(last_loss, 3)) + ")"
+
+let prompt_ids = lm.encode("zen ", vocab["stoi"])
+let sample = model.generate(prompt_ids, 45, vocab["itos"])
+say "generated:"
+say sample

@@ -1,0 +1,6 @@
+// Exercise 1: Print your name and favorite number using say.
+let name = "ZEN Learner"
+let fav = 7
+say name
+say fav
+assert fav == 7

@@ -1,0 +1,6 @@
+import "lib/helper_mod.zen" as h
+
+say "triple(4) = " + str(h.triple(4))
+
+let note = read_file("docs/guide_examples/lib/helper_mod.zen")
+say "helper lines = " + str(len(split(trim(note), "\n")))

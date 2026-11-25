@@ -1,0 +1,9 @@
+let score = 82
+
+if score >= 90 {
+    say "Grade A"
+} elif score >= 75 {
+    say "Grade B"
+} else {
+    say "Keep practicing"
+}

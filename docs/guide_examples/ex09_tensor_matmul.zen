@@ -1,0 +1,8 @@
+// Exercise 9: Multiply two 2x2 tensors and take their mean.
+let a = tensor([[1, 2], [3, 4]])
+let b = tensor([[2, 0], [1, 2]])
+let p = a @ b
+let m = mean(p)
+say p
+say m
+assert m == 6.5

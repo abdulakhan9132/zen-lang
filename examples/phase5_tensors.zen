@@ -1,0 +1,19 @@
+// Phase 5 example: Pure-Python Tensor engine tested from .zen code.
+let a = tensor([[1, 2, 3], [4, 5, 6]])
+let bias = tensor([10, 20, 30])
+
+// Broadcasting addition
+let shifted = a + bias
+say "shifted: " + str(shifted)
+
+// Transpose and matrix multiplication (@)
+let b = reshape(tensor([1, 2, 3, 4, 5, 6]), [3, 2])
+let prod = a @ b
+say "a @ b = " + str(prod)
+say "shape(a @ b) = " + str(shape(prod))
+
+// Reductions
+say "sum = " + str(sum(prod))
+say "mean = " + str(mean(prod))
+say "max = " + str(max(prod))
+say "col sum = " + str(tensor_sum(prod, 0))

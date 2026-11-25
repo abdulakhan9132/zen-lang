@@ -1,0 +1,80 @@
+// Phase 14 example: Train AutoCharGPT on examples/data/corpus.txt for 2000 steps
+// with checkpoint saving every 500 steps and resume support.
+import "../stdlib/ai/tensor_nn.zen" as tnn
+import "../stdlib/ai/tensor_gpt.zen" as auto_lm
+
+seed(42)
+
+let text = read_file("examples/data/corpus.txt")
+let vocab = auto_lm.build_vocab(text)
+let data = auto_lm.encode(text, vocab["stoi"])
+let split_idx = int(len(data) * 0.9)
+let train_data = slice(data, 0, split_idx)
+let val_data = slice(data, split_idx, len(data))
+
+const BLOCK_SIZE = 12
+const BATCH_SIZE = 4
+// d_model=32 measured ~110 ms/step (~220s for 2000 steps); shrunk to d_model=16 (~54 ms/step)
+const D_MODEL = 16
+const TOTAL_STEPS = 2000
+const LR = 0.02
+const CKPT_PATH = "examples/data/gpt_checkpoint.json"
+
+fn get_batch(src_data, batch_size, block_size) {
+    let bx = []
+    let by = []
+    let max_start = len(src_data) - block_size - 1
+    for b in range(batch_size) {
+        let idx = randint(0, max_start)
+        push(bx, slice(src_data, idx, idx + block_size))
+        push(by, slice(src_data, idx + 1, idx + 1 + block_size))
+    }
+    return {"x": bx, "y": by}
+}
+
+let model = auto_lm.AutoCharGPT(vocab["size"], BLOCK_SIZE, D_MODEL)
+let opt = tnn.Adam(model.parameters(), LR)
+
+let start_step = 0
+if file_exists(CKPT_PATH) {
+    let saved_step = model.load_checkpoint(CKPT_PATH, opt)
+    start_step = saved_step + 1
+    say "Resumed from checkpoint at step " + str(saved_step)
+}
+
+let t0 = clock()
+let steps_done = 0
+
+for step in range(start_step, TOTAL_STEPS) {
+    let batch = get_batch(train_data, BATCH_SIZE, BLOCK_SIZE)
+    let loss = model.compute_loss(batch["x"], batch["y"])
+    let lval = loss.data.tolist()
+
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+    steps_done = steps_done + 1
+
+    if step % 100 == 0 or step == TOTAL_STEPS - 1 {
+        say "step " + str(step) + " | loss = " + str(round(lval, 4))
+    }
+    if (step + 1) % 500 == 0 {
+        model.save_checkpoint(CKPT_PATH, step, opt)
+        say "saved checkpoint at step " + str(step)
+    }
+}
+
+let elapsed = clock() - t0
+let ms_per_step = 0.0
+if steps_done > 0 {
+    ms_per_step = round((elapsed / float(steps_done)) * 1000.0, 2)
+}
+
+let val_batch = get_batch(val_data, BATCH_SIZE, BLOCK_SIZE)
+let val_loss = model.compute_loss(val_batch["x"], val_batch["y"]).data.tolist()
+
+say "total time: " + str(round(elapsed, 2)) + "s | time/step: " + str(ms_per_step) + " ms | val_loss: " + str(round(val_loss, 4))
+
+let prompt = auto_lm.encode("Once upon a ", vocab["stoi"])
+say "generated:"
+say model.generate(prompt, 120, vocab["itos"])

@@ -1,0 +1,17 @@
+// Exercise 8: Build a Counter class with inc() and value().
+class Counter {
+    fn init(self) {
+        self.n = 0
+    }
+    fn inc(self) {
+        self.n = self.n + 1
+    }
+    fn value(self) {
+        return self.n
+    }
+}
+let c = Counter()
+c.inc()
+c.inc()
+say c.value()
+assert c.value() == 2

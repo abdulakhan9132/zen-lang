@@ -1,0 +1,8 @@
+let a = tensor([[1, 2], [3, 4]])
+let b = ones([2, 2]) * 10
+let c = a + b
+let d = a @ transpose(a)
+
+say "a + b = " + str(c)
+say "a @ a.T = " + str(d)
+say "sum = " + str(sum(a))

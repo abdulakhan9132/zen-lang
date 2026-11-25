@@ -1,0 +1,6 @@
+zen is a tiny ai language.
+zen can learn text.
+zen builds neural nets.
+zen is a tiny ai language.
+zen can learn text.
+zen builds neural nets.

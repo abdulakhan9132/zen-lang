@@ -1,0 +1,9 @@
+let nums = [1, 2, 3]
+push(nums, 4)
+say nums
+say "len = " + str(len(nums))
+say "doubled = " + str(map(nums, fn(x) { return x * 2 }))
+
+let ages = {"sara": 21, "omar": 25}
+say keys(ages)
+say ages["sara"]

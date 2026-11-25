@@ -1,0 +1,400 @@
+// Tensor Autograd written completely in ZEN.
+// Records computation graphs over whole tensors and computes gradients via backward().
+
+let _next_tensor_id = 0
+
+fn _new_tid() {
+    _next_tensor_id = _next_tensor_id + 1
+    return _next_tensor_id
+}
+
+fn _noop() {
+    return none
+}
+
+fn _numel(s) {
+    let total = 1
+    for d in s {
+        total = total * d
+    }
+    return total
+}
+
+fn _unbroadcast(grad_t, target_shape) {
+    let g_shape = shape(grad_t)
+    if g_shape == target_shape {
+        return grad_t
+    }
+    if len(target_shape) == 0 {
+        return tensor(tensor_sum(grad_t, none, false))
+    }
+    let cur = grad_t
+    while len(shape(cur)) > len(target_shape) {
+        cur = tensor_sum(cur, 0, false)
+    }
+    for i in range(len(target_shape)) {
+        if target_shape[i] == 1 and shape(cur)[i] > 1 {
+            cur = tensor_sum(cur, i, true)
+        }
+    }
+    return cur
+}
+
+fn _swap_last_two(ndim) {
+    let axes = []
+    for i in range(ndim) {
+        push(axes, i)
+    }
+    let tmp = axes[ndim - 2]
+    axes[ndim - 2] = axes[ndim - 1]
+    axes[ndim - 1] = tmp
+    return axes
+}
+
+class Tensor {
+    fn init(self, data, children, op) {
+        self._id = _new_tid()
+        if type(data) == "tensor" {
+            self.data = data
+        } else {
+            self.data = tensor(data)
+        }
+        self.shape = shape(self.data)
+        self.grad = zeros(self.shape)
+        self._prev = children
+        self._op = op
+        self._backward = _noop
+    }
+
+    fn zero_grad(self) {
+        self.grad = zeros(self.shape)
+    }
+
+    fn __neg__(self) {
+        let out = Tensor(self.data * -1.0, [self], "neg")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad - out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __add__(self, other) {
+        let b = ensure_tensor(other)
+        let out = Tensor(self.data + b.data, [self, b], "+")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + _unbroadcast(out.grad, a.shape)
+            b.grad = b.grad + _unbroadcast(out.grad, b.shape)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __radd__(self, other) {
+        return ensure_tensor(other).__add__(self)
+    }
+
+    fn __sub__(self, other) {
+        let b = ensure_tensor(other)
+        let out = Tensor(self.data - b.data, [self, b], "-")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + _unbroadcast(out.grad, a.shape)
+            b.grad = b.grad - _unbroadcast(out.grad, b.shape)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __rsub__(self, other) {
+        return ensure_tensor(other).__sub__(self)
+    }
+
+    fn __mul__(self, other) {
+        let b = ensure_tensor(other)
+        let out = Tensor(self.data * b.data, [self, b], "*")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + _unbroadcast(out.grad * b.data, a.shape)
+            b.grad = b.grad + _unbroadcast(out.grad * a.data, b.shape)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __rmul__(self, other) {
+        return ensure_tensor(other).__mul__(self)
+    }
+
+    fn __truediv__(self, other) {
+        let b = ensure_tensor(other)
+        let out = Tensor(self.data / b.data, [self, b], "/")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + _unbroadcast(out.grad / b.data, a.shape)
+            b.grad = b.grad + _unbroadcast((-out.grad * a.data) / (b.data * b.data), b.shape)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn __rtruediv__(self, other) {
+        return ensure_tensor(other).__truediv__(self)
+    }
+
+    fn __matmul__(self, other) {
+        let b = ensure_tensor(other)
+        let res = self.data @ b.data
+        let out = Tensor(res, [self, b], "@")
+        let a = self
+        fn _bw() {
+            let nd_a = len(a.shape)
+            let nd_b = len(b.shape)
+            if nd_a == 1 and nd_b == 1 {
+                a.grad = a.grad + b.data * out.grad
+                b.grad = b.grad + a.data * out.grad
+                return none
+            }
+            if nd_a == 2 and nd_b == 1 {
+                let g2 = reshape(out.grad, [a.shape[0], 1])
+                let b2 = reshape(b.data, [1, b.shape[0]])
+                a.grad = a.grad + (g2 @ b2)
+                b.grad = b.grad + (transpose(a.data) @ out.grad)
+                return none
+            }
+            if nd_a == 1 and nd_b == 2 {
+                a.grad = a.grad + (out.grad @ transpose(b.data))
+                let a2 = reshape(a.data, [a.shape[0], 1])
+                let g2 = reshape(out.grad, [1, b.shape[1]])
+                b.grad = b.grad + (a2 @ g2)
+                return none
+            }
+            let b_t = transpose(b.data, _swap_last_two(nd_b))
+            let a_t = transpose(a.data, _swap_last_two(nd_a))
+            a.grad = a.grad + _unbroadcast(out.grad @ b_t, a.shape)
+            b.grad = b.grad + _unbroadcast(a_t @ out.grad, b.shape)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn sum(self) {
+        let out = Tensor(tensor_sum(self.data, none, false), [self], "sum")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + ones(a.shape) * out.grad
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn sum_axis(self, axis, keepdims) {
+        let out = Tensor(tensor_sum(self.data, axis, keepdims), [self], "sum_axis")
+        let a = self
+        let ax = axis
+        if ax < 0 {
+            ax = ax + len(a.shape)
+        }
+        let kd = keepdims
+        fn _bw() {
+            let g = out.grad
+            if not kd {
+                let expanded = []
+                for i in range(len(a.shape)) {
+                    if i == ax {
+                        push(expanded, 1)
+                    } else {
+                        push(expanded, a.shape[i])
+                    }
+                }
+                g = reshape(g, expanded)
+            }
+            a.grad = a.grad + (ones(a.shape) * g)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn mean(self) {
+        let n = float(_numel(self.shape))
+        let out = Tensor(tensor_mean(self.data, none, false), [self], "mean")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + ones(a.shape) * (out.grad / n)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn mean_axis(self, axis, keepdims) {
+        let ax = axis
+        if ax < 0 {
+            ax = ax + len(self.shape)
+        }
+        let count = float(self.shape[ax])
+        let out = Tensor(tensor_mean(self.data, axis, keepdims), [self], "mean_axis")
+        let a = self
+        let kd = keepdims
+        fn _bw() {
+            let g = out.grad
+            if not kd {
+                let expanded = []
+                for i in range(len(a.shape)) {
+                    if i == ax {
+                        push(expanded, 1)
+                    } else {
+                        push(expanded, a.shape[i])
+                    }
+                }
+                g = reshape(g, expanded)
+            }
+            a.grad = a.grad + (ones(a.shape) * (g / count))
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn transpose(self) {
+        let out = Tensor(transpose(self.data), [self], "T")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + transpose(out.grad)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn transpose_axes(self, axes) {
+        let out = Tensor(transpose(self.data, axes), [self], "transpose")
+        let inv = []
+        for i in range(len(axes)) {
+            push(inv, 0)
+        }
+        for i in range(len(axes)) {
+            inv[axes[i]] = i
+        }
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + transpose(out.grad, inv)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn reshape(self, new_shape) {
+        let out = Tensor(reshape(self.data, new_shape), [self], "reshape")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + reshape(out.grad, a.shape)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn exp(self) {
+        let e = exp(self.data)
+        let out = Tensor(e, [self], "exp")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (out.grad * out.data)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn log(self) {
+        let out = Tensor(log(self.data), [self], "log")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (out.grad / a.data)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn relu(self) {
+        let out = Tensor(tensor_clamp_min(self.data, 0.0), [self], "relu")
+        let mask = tensor_gt(self.data, 0.0)
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (out.grad * mask)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn tanh(self) {
+        let out = Tensor(tanh(self.data), [self], "tanh")
+        let a = self
+        fn _bw() {
+            a.grad = a.grad + (out.grad * (1.0 - (out.data * out.data)))
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn softmax(self) {
+        let m = tensor_max(self.data, -1, true)
+        let e = exp(self.data - m)
+        let s = tensor_sum(e, -1, true)
+        let probs = e / s
+        let out = Tensor(probs, [self], "softmax")
+        let a = self
+        fn _bw() {
+            let dot = tensor_sum(out.data * out.grad, -1, true)
+            a.grad = a.grad + (out.data * (out.grad - dot))
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn gather(self, indices) {
+        let out = Tensor(tensor_gather(self.data, indices), [self], "gather")
+        let a = self
+        let idxs = indices
+        fn _bw() {
+            a.grad = a.grad + tensor_scatter_add(a.shape, idxs, out.grad)
+        }
+        out._backward = _bw
+        return out
+    }
+
+    fn backward(self) {
+        let topo = []
+        let visited = {}
+
+        fn build_topo(v) {
+            if contains(visited, v._id) {
+                return none
+            }
+            visited[v._id] = true
+            for child in v._prev {
+                build_topo(child)
+            }
+            push(topo, v)
+        }
+
+        build_topo(self)
+        self.grad = ones(self.shape)
+
+        let i = len(topo) - 1
+        while i >= 0 {
+            let node = topo[i]
+            node._backward()
+            i = i - 1
+        }
+    }
+}
+
+fn from(data) {
+    return Tensor(data, [], "")
+}
+
+fn ensure_tensor(x) {
+    if type(x) == "Tensor" {
+        return x
+    }
+    return Tensor(x, [], "")
+}

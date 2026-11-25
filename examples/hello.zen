@@ -1,0 +1,10 @@
+// Milestone program for Phase 3 (Interpreter).
+let language = "ZEN"
+let version = 0.1
+
+fn introduce() {
+    say "I am " + language
+    say version
+}
+
+introduce()

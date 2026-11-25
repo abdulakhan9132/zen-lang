@@ -1,0 +1,7 @@
+fn square(n: int) -> int {
+    return n * n
+}
+
+let x: int = 6
+let inferred = square(x)
+say "square = " + str(inferred)

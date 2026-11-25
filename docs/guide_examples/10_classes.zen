@@ -1,0 +1,12 @@
+class Dog {
+    fn init(self, name) {
+        self.name = name
+    }
+
+    fn speak(self) {
+        say self.name + " says woof!"
+    }
+}
+
+let pet = Dog("Nova")
+pet.speak()

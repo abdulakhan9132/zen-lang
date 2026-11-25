@@ -1,0 +1,17 @@
+// Phase 6 example: micrograd-style Autograd written entirely in ZEN.
+import "../stdlib/ai/autograd.zen" as ag
+
+let a = ag.value(2.0)
+let b = ag.value(-3.0)
+let c = ag.value(10.0)
+let d = a * b + c
+let f = d.relu()
+
+f.backward()
+
+// d = 2*(-3) + 10 = 4 -> relu(4) = 4
+// df/da = b = -3, df/db = a = 2, df/dc = 1
+say "f = " + str(f.data)
+say "df/da = " + str(a.grad)
+say "df/db = " + str(b.grad)
+say "df/dc = " + str(c.grad)

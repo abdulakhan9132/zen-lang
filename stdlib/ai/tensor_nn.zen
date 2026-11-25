@@ -1,0 +1,124 @@
+// Tensor-autograd Neural Network layers, losses, and Adam optimizer in ZEN.
+import "tensor_autograd.zen" as ta
+
+fn sigmoid(x) {
+    let t = ta.ensure_tensor(x)
+    return 1.0 / (1.0 + (-t).exp())
+}
+
+fn tensor_mse_loss(preds, targets) {
+    let diff = preds - ta.ensure_tensor(targets)
+    return (diff * diff).mean()
+}
+
+fn tensor_cross_entropy(logits, target_ids) {
+    // logits: Tensor of shape [N, V], target_ids: list of N ints
+    let s = logits.shape
+    let n = s[0]
+    let v = s[1]
+    let probs = logits.softmax()
+    let oh_rows = []
+    for i in range(n) {
+        let row = []
+        let tgt = target_ids[i]
+        for j in range(v) {
+            if j == tgt {
+                push(row, 1.0)
+            } else {
+                push(row, 0.0)
+            }
+        }
+        push(oh_rows, row)
+    }
+    let one_hot = ta.from(oh_rows)
+    return -((probs + 1e-9).log() * one_hot).sum() / float(n)
+}
+
+class TensorLinear {
+    fn init(self, nin, nout, activation) {
+        let scale = 1.0 / sqrt(float(nin))
+        self.w = ta.from(randn([nin, nout]) * scale)
+        self.b = ta.from(zeros([1, nout]))
+        self.activation = activation
+    }
+
+    fn forward(self, x) {
+        let out = x @ self.w + self.b
+        if self.activation == "relu" {
+            return out.relu()
+        }
+        if self.activation == "tanh" {
+            return out.tanh()
+        }
+        if self.activation == "sigmoid" {
+            return sigmoid(out)
+        }
+        return out
+    }
+
+    fn parameters(self) {
+        return [self.w, self.b]
+    }
+}
+
+class TensorMLP {
+    fn init(self, layers) {
+        self.layers = layers
+    }
+
+    fn forward(self, x) {
+        let cur = ta.ensure_tensor(x)
+        for layer in self.layers {
+            cur = layer.forward(cur)
+        }
+        return cur
+    }
+
+    fn parameters(self) {
+        let params = []
+        for layer in self.layers {
+            for p in layer.parameters() {
+                push(params, p)
+            }
+        }
+        return params
+    }
+}
+
+class Adam {
+    fn init(self, params, lr) {
+        self.params = params
+        self.lr = float(lr)
+        self.beta1 = 0.9
+        self.beta2 = 0.999
+        self.eps = 1e-8
+        self.t = 0
+        self.m = []
+        self.v = []
+        for p in params {
+            push(self.m, zeros(p.shape))
+            push(self.v, zeros(p.shape))
+        }
+    }
+
+    fn zero_grad(self) {
+        for p in self.params {
+            p.zero_grad()
+        }
+    }
+
+    fn step(self) {
+        self.t = self.t + 1
+        let b1c = 1.0 - (self.beta1 ** self.t)
+        let b2c = 1.0 - (self.beta2 ** self.t)
+        for i in range(len(self.params)) {
+            let p = self.params[i]
+            let g = p.grad
+            self.m[i] = self.m[i] * self.beta1 + g * (1.0 - self.beta1)
+            self.v[i] = self.v[i] * self.beta2 + (g * g) * (1.0 - self.beta2)
+            let m_hat = self.m[i] / b1c
+            let v_hat = self.v[i] / b2c
+            p.data = p.data - (m_hat * self.lr) / (sqrt(v_hat) + self.eps)
+        }
+    }
+}

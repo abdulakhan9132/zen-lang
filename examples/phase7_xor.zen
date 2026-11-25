@@ -1,0 +1,41 @@
+// Phase 7 example: Train an MLP written in .zen to solve XOR.
+import "../stdlib/ai/nn.zen" as nn
+
+seed(42)
+
+let xs = [
+    [0.0, 0.0],
+    [0.0, 1.0],
+    [1.0, 0.0],
+    [1.0, 1.0],
+]
+let ys = [0.0, 1.0, 1.0, 0.0]
+
+let model = nn.MLP([
+    nn.Dense(2, 4, "tanh"),
+    nn.Dense(4, 1, "sigmoid"),
+])
+let opt = nn.SGD(model.parameters(), 0.8)
+
+let epochs = 200
+for epoch in range(epochs) {
+    let preds = []
+    for x in xs {
+        push(preds, model.forward(x))
+    }
+    let loss = nn.mse_loss(preds, ys)
+
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+
+    if epoch % 40 == 0 or epoch == epochs - 1 {
+        say "epoch " + str(epoch) + " | loss = " + str(round(loss.data, 5))
+    }
+}
+
+say "--- XOR predictions ---"
+for i in range(len(xs)) {
+    let p = model.forward(xs[i])
+    say str(xs[i]) + " -> " + str(round(p.data, 4)) + " (target " + str(ys[i]) + ")"
+}

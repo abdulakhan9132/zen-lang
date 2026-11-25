@@ -1,0 +1,18 @@
+// ZEN self-test 5: scalar and matrix autograd in .zen.
+import "../stdlib/ai/autograd.zen" as ag
+import "../stdlib/ai/tensor_autograd.zen" as ta
+
+let x = ag.value(3.0)
+let y = ag.value(2.0)
+let f = (x * y + x ** 2) / y
+f.backward()
+assert abs(f.data - 7.5) < 1e-9
+assert abs(x.grad - 4.0) < 1e-9
+assert abs(y.grad - (-2.25)) < 1e-9
+
+let w = ta.from([[1.0, 2.0], [3.0, 4.0]])
+let v = ta.from([[2.0], [1.0]])
+let loss = (w @ v).sum()
+loss.backward()
+assert w.grad.tolist() == [[2.0, 1.0], [2.0, 1.0]]
+assert v.grad.tolist() == [[4.0], [6.0]]

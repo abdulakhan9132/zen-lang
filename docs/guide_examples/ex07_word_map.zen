@@ -1,0 +1,12 @@
+// Exercise 7: Count words in a sentence stored in a map.
+let words = split("zen is fast and zen is fun", " ")
+let counts = {}
+for w in words {
+    if contains(counts, w) {
+        counts[w] = counts[w] + 1
+    } else {
+        counts[w] = 1
+    }
+}
+say counts["zen"]
+assert counts["zen"] == 2

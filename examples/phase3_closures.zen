@@ -1,0 +1,18 @@
+// Phase 3 example: closures, lists, maps, loops, and functions.
+fn make_counter(start) {
+    let n = start
+    fn inc() {
+        n = n + 1
+        return n
+    }
+    return inc
+}
+
+let counter = make_counter(10)
+say counter()
+say counter()
+
+let scores = {"alice": 3, "bob": 5}
+for name in scores {
+    say name + ": " + str(scores[name])
+}

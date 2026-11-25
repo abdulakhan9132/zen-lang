@@ -1,0 +1,8 @@
+// Phase 15 example: Using `assert` and optional type annotations.
+fn add_ints(a: int, b: int) -> int {
+    return a + b
+}
+
+let res: int = add_ints(20, 22)
+assert res == 42, "add_ints(20, 22) should equal 42"
+say "All Phase 15 checks passed: res = " + str(res)

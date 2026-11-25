@@ -1,0 +1,34 @@
+// ZEN self-test 2: control flow, loops, functions, recursion, and closures.
+fn fib(n: int) -> int {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+assert fib(8) == 21, "fibonacci failed"
+
+fn make_counter(start: int) {
+    let n = start
+    fn inc() {
+        n = n + 1
+        return n
+    }
+    return inc
+}
+
+let c = make_counter(5)
+assert c() == 6
+assert c() == 7
+
+let total = 0
+for i in range(10) {
+    if i == 2 {
+        continue
+    }
+    if i == 6 {
+        break
+    }
+    total = total + i
+}
+assert total == 13, "loop break/continue failed"

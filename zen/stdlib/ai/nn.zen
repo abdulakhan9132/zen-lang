@@ -1,0 +1,157 @@
+// Neural network building blocks written completely in ZEN.
+import "autograd.zen" as ag
+
+fn relu(x) {
+    return ag.ensure_value(x).relu()
+}
+
+fn sigmoid(x) {
+    return ag.ensure_value(x).sigmoid()
+}
+
+fn softmax(logits) {
+    let max_val = logits[0].data
+    for i in range(1, len(logits)) {
+        if logits[i].data > max_val {
+            max_val = logits[i].data
+        }
+    }
+    let exps = []
+    let total = ag.value(0.0)
+    for logit in logits {
+        let e = (logit - max_val).exp()
+        push(exps, e)
+        total = total + e
+    }
+    let probs = []
+    for e in exps {
+        push(probs, e / total)
+    }
+    return probs
+}
+
+fn mse_loss(preds, targets) {
+    let total = ag.value(0.0)
+    let n = len(preds)
+    for i in range(n) {
+        let diff = preds[i] - targets[i]
+        total = total + diff * diff
+    }
+    return total / float(n)
+}
+
+fn cross_entropy_loss(probs, target_idx) {
+    let p = probs[target_idx] + 1e-9
+    return -p.log()
+}
+
+class Neuron {
+    fn init(self, nin, activation) {
+        self.w = []
+        let scale = 1.0 / sqrt(float(nin))
+        for i in range(nin) {
+            push(self.w, ag.value(uniform(-scale, scale)))
+        }
+        self.b = ag.value(0.0)
+        self.activation = activation
+    }
+
+    fn forward(self, x) {
+        let act = self.b
+        for i in range(len(self.w)) {
+            act = act + self.w[i] * x[i]
+        }
+        if self.activation == "relu" {
+            return act.relu()
+        }
+        if self.activation == "sigmoid" {
+            return act.sigmoid()
+        }
+        if self.activation == "tanh" {
+            return act.tanh()
+        }
+        return act
+    }
+
+    fn parameters(self) {
+        let params = []
+        for weight in self.w {
+            push(params, weight)
+        }
+        push(params, self.b)
+        return params
+    }
+}
+
+class Dense {
+    fn init(self, nin, nout, activation) {
+        self.neurons = []
+        for i in range(nout) {
+            push(self.neurons, Neuron(nin, activation))
+        }
+    }
+
+    fn forward(self, x) {
+        let out = []
+        for n in self.neurons {
+            push(out, n.forward(x))
+        }
+        if len(out) == 1 {
+            return out[0]
+        }
+        return out
+    }
+
+    fn parameters(self) {
+        let params = []
+        for n in self.neurons {
+            for p in n.parameters() {
+                push(params, p)
+            }
+        }
+        return params
+    }
+}
+
+class MLP {
+    fn init(self, layers) {
+        self.layers = layers
+    }
+
+    fn forward(self, x) {
+        let cur = x
+        for layer in self.layers {
+            cur = layer.forward(cur)
+        }
+        return cur
+    }
+
+    fn parameters(self) {
+        let params = []
+        for layer in self.layers {
+            for p in layer.parameters() {
+                push(params, p)
+            }
+        }
+        return params
+    }
+}
+
+class SGD {
+    fn init(self, params, lr) {
+        self.params = params
+        self.lr = float(lr)
+    }
+
+    fn zero_grad(self) {
+        for p in self.params {
+            p.grad = 0.0
+        }
+    }
+
+    fn step(self) {
+        for p in self.params {
+            p.data = p.data - self.lr * p.grad
+        }
+    }
+}

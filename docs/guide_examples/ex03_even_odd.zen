@@ -1,0 +1,8 @@
+// Exercise 3: Check if a number is even or odd.
+let n = 14
+let label = "odd"
+if n % 2 == 0 {
+    label = "even"
+}
+say label
+assert label == "even"

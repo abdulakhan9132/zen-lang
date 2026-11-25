@@ -1,0 +1,5 @@
+// Exercise 6: Filter a list to keep only numbers >= 10.
+let xs = [3, 12, 7, 19, 10]
+let big = filter(xs, fn(x) { return x >= 10 })
+say big
+assert big == [12, 19, 10]

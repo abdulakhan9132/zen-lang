@@ -1,0 +1,10 @@
+let count = 7
+let price = 4.5
+let title = "ZEN"
+let ready = true
+let empty = none
+let items = [1, 2, 3]
+let scores = {"ali": 10}
+
+say type(count), type(price), type(title), type(ready)
+say type(empty), type(items), type(scores)
