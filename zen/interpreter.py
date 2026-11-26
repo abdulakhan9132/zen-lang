@@ -115,17 +115,176 @@ class ZenBuiltin:
     name: str
     fn: Callable[..., Any]
 
-    def call(self, interpreter: "Interpreter", args: list[Any], line: int, col: int) -> Any:
+    def call(
+        self,
+        interpreter: "Interpreter",
+        args: list[Any],
+        line: int,
+        col: int,
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
         try:
+            if kwargs:
+                return self.fn(*args, **kwargs)
             return self.fn(*args)
         except ZenRuntimeError:
             raise
         except TypeError as exc:
-            raise ZenRuntimeError(f"Built-in '{self.name}' argument error: {exc}", line, col) from exc
+            raise ZenRuntimeError(f"Built-in '{self.name}' argument error: {exc}", line, col, code="E006") from exc
         except ValueError as exc:
-            raise ZenRuntimeError(f"Built-in '{self.name}' value error: {exc}", line, col) from exc
+            raise ZenRuntimeError(f"Built-in '{self.name}' value error: {exc}", line, col, code="E004") from exc
         except OSError as exc:
-            raise ZenRuntimeError(f"Built-in '{self.name}' I/O error: {exc}", line, col) from exc
+            raise ZenRuntimeError(f"Built-in '{self.name}' I/O error: {exc}", line, col, code="E009") from exc
+
+
+def bind_call_args(
+    fn_name: str,
+    params: list[str],
+    defaults: tuple[Any, ...],
+    pos_args: list[Any],
+    kw_pairs: list[tuple[str, Any]] | None,
+    bound_self: Any,
+    line: int,
+    col: int,
+) -> list[Any]:
+    """Bind positional, keyword, and default arguments onto a ZEN parameter list."""
+    actual_pos = ([bound_self] + pos_args) if bound_self is not None else list(pos_args)
+    total = len(params)
+    min_total = total - len(defaults)
+    if not kw_pairs:
+        if len(actual_pos) < min_total or len(actual_pos) > total:
+            offset = 1 if bound_self is not None and total > 0 else 0
+            shown_min = max(0, min_total - offset)
+            shown_max = max(0, total - offset)
+            exp = f"{shown_min}" if shown_min == shown_max else f"{shown_min} to {shown_max}"
+            raise ZenRuntimeError(
+                f"Function '{fn_name}' expected {exp} argument(s), got {len(pos_args)}",
+                line,
+                col,
+                code="E006",
+            )
+        if len(actual_pos) < total:
+            actual_pos = actual_pos + list(defaults[len(actual_pos) - min_total :])
+        return actual_pos
+
+    if len(actual_pos) > total:
+        offset = 1 if bound_self is not None and total > 0 else 0
+        raise ZenRuntimeError(
+            f"Function '{fn_name}' expected at most {total - offset} argument(s), got {len(pos_args) + len(kw_pairs)}",
+            line,
+            col,
+            code="E006",
+        )
+    slots: list[Any] = [None] * total
+    assigned = [False] * total
+    for i, v in enumerate(actual_pos):
+        slots[i] = v
+        assigned[i] = True
+
+    offset = 1 if bound_self is not None and total > 0 else 0
+    param_idx = {p: i for i, p in enumerate(params)}
+    valid_kw = params[offset:]
+    for kname, kval in kw_pairs:
+        idx = param_idx.get(kname, -1)
+        if idx < offset:
+            hint = did_you_mean(kname, valid_kw)
+            suffix = f". Did you mean '{hint}'?" if hint else ""
+            raise ZenRuntimeError(
+                f"Function '{fn_name}' got unexpected keyword argument '{kname}'{suffix}",
+                line,
+                col,
+                code="E006",
+            )
+        if assigned[idx]:
+            raise ZenRuntimeError(
+                f"Function '{fn_name}' got multiple values for argument '{kname}'",
+                line,
+                col,
+                code="E006",
+            )
+        slots[idx] = kval
+        assigned[idx] = True
+
+    for i in range(total):
+        if not assigned[i]:
+            if i >= min_total:
+                slots[i] = defaults[i - min_total]
+            else:
+                raise ZenRuntimeError(
+                    f"Function '{fn_name}' missing required argument '{params[i]}'",
+                    line,
+                    col,
+                    code="E006",
+                )
+    return slots
+
+
+def make_error_instance(exc: ZenRuntimeError, fallback_line: int = 0) -> "ZenInstance":
+    """Wrap a ZenRuntimeError as a ZEN Error object with .message, .line, and .code."""
+    inst = ZenInstance(ZenClass("Error", {}))
+    inst.fields["message"] = exc.message
+    inst.fields["line"] = exc.line if exc.line else fallback_line
+    inst.fields["code"] = exc.code or "E012"
+    return inst
+
+
+def str_member(s: str, member: str, make_builtin_cls: type[ZenBuiltin], line: int, col: int) -> Any:
+    """Resolve built-in string methods."""
+    if member == "split":
+        return make_builtin_cls("split", lambda sep=None: s.split() if sep is None else (list(s) if sep == "" else s.split(sep)))
+    if member == "join":
+        return make_builtin_cls("join", lambda items: s.join(zen_format(x) for x in items))
+    if member == "upper":
+        return make_builtin_cls("upper", s.upper)
+    if member == "lower":
+        return make_builtin_cls("lower", s.lower)
+    if member == "strip":
+        return make_builtin_cls("strip", lambda chars=None: s.strip() if chars is None else s.strip(chars))
+    if member == "replace":
+        return make_builtin_cls("replace", lambda old, new, count=-1: s.replace(old, new) if count < 0 else s.replace(old, new, count))
+    if member == "startswith":
+        return make_builtin_cls("startswith", s.startswith)
+    if member == "endswith":
+        return make_builtin_cls("endswith", s.endswith)
+    if member == "find":
+        return make_builtin_cls("find", lambda sub, start=0, end=None: s.find(sub, start) if end is None else s.find(sub, start, end))
+    hint = did_you_mean(member, ("split", "join", "upper", "lower", "strip", "replace", "startswith", "endswith", "find"))
+    suffix = f". Did you mean '{hint}'?" if hint else ""
+    raise ZenRuntimeError(f"String has no method '{member}'{suffix}", line, col, code="E003")
+
+
+def list_member(lst: list[Any], member: str, make_builtin_cls: type[ZenBuiltin], line: int, col: int) -> Any:
+    """Resolve built-in list methods."""
+    if member == "append":
+        return make_builtin_cls("append", lambda item: lst.append(item))
+    if member == "pop":
+        def _pop(idx: int | None = None) -> Any:
+            if not lst:
+                raise ZenRuntimeError("Cannot pop from an empty list", line, col, code="E008")
+            try:
+                return lst.pop() if idx is None else lst.pop(idx)
+            except IndexError as exc:
+                raise ZenRuntimeError(f"pop index {idx} out of range", line, col, code="E008") from exc
+        return make_builtin_cls("pop", _pop)
+    if member == "sort":
+        def _sort(reverse: bool = False) -> None:
+            try:
+                lst.sort(reverse=bool(reverse))
+            except TypeError as exc:
+                raise ZenRuntimeError(f"Cannot sort list with mixed types: {exc}", line, col, code="E004") from exc
+        return make_builtin_cls("sort", _sort)
+    if member == "reverse":
+        return make_builtin_cls("reverse", lst.reverse)
+    if member == "index":
+        def _index(val: Any) -> int:
+            try:
+                return lst.index(val)
+            except ValueError as exc:
+                raise ZenRuntimeError(f"Value {zen_format(val)!r} is not in list", line, col, code="E008") from exc
+        return make_builtin_cls("index", _index)
+    hint = did_you_mean(member, ("append", "pop", "sort", "reverse", "index"))
+    suffix = f". Did you mean '{hint}'?" if hint else ""
+    raise ZenRuntimeError(f"List has no method '{member}'{suffix}", line, col, code="E003")
 
 
 class ZenFunction:
@@ -152,23 +311,9 @@ class ZenFunction:
         line: int,
         col: int,
         bound_self: "ZenInstance | None" = None,
+        kwargs: list[tuple[str, Any]] | None = None,
     ) -> Any:
-        total = len(self.params)
-        min_total = total - len(self.defaults)
-        actual_args = ([bound_self] + args) if bound_self is not None else list(args)
-        if len(actual_args) < min_total or len(actual_args) > total:
-            offset = 1 if bound_self is not None and total > 0 else 0
-            shown_min = max(0, min_total - offset)
-            shown_max = max(0, total - offset)
-            exp = f"{shown_min}" if shown_min == shown_max else f"{shown_min} to {shown_max}"
-            raise ZenRuntimeError(
-                f"Function '{self.name}' expected {exp} argument(s), got {len(args)}",
-                line,
-                col,
-                code="E006",
-            )
-        if len(actual_args) < total:
-            actual_args = actual_args + list(self.defaults[len(actual_args) - min_total :])
+        actual_args = bind_call_args(self.name, self.params, self.defaults, args, kwargs, bound_self, line, col)
         if interpreter._call_depth + 1 > interpreter.max_depth:
             raise ZenRuntimeError(
                 f"Maximum recursion depth ({interpreter.max_depth}) exceeded in '{self.name}' at depth {interpreter._call_depth + 1}",
@@ -208,8 +353,15 @@ class ZenBoundMethod:
     def name(self) -> str:
         return self.method.name
 
-    def call(self, interpreter: "Interpreter", args: list[Any], line: int, col: int) -> Any:
-        return self.method.call(interpreter, args, line, col, bound_self=self.instance)
+    def call(
+        self,
+        interpreter: "Interpreter",
+        args: list[Any],
+        line: int,
+        col: int,
+        kwargs: list[tuple[str, Any]] | None = None,
+    ) -> Any:
+        return self.method.call(interpreter, args, line, col, bound_self=self.instance, kwargs=kwargs)
 
 
 class ZenClass:
@@ -240,16 +392,24 @@ class ZenClass:
         suffix = f". Did you mean '{hint}'?" if hint else ""
         raise ZenRuntimeError(f"Class '{self.name}' has no method '{name}'{suffix}", line, col, code="E003")
 
-    def call(self, interpreter: "Interpreter", args: list[Any], line: int, col: int) -> "ZenInstance":
+    def call(
+        self,
+        interpreter: "Interpreter",
+        args: list[Any],
+        line: int,
+        col: int,
+        kwargs: list[tuple[str, Any]] | None = None,
+    ) -> "ZenInstance":
         instance = ZenInstance(self)
         init_method = self.find_method("init")
         if init_method is not None:
-            init_method.call(interpreter, args, line, col, bound_self=instance)
-        elif args:
+            init_method.call(interpreter, args, line, col, bound_self=instance, kwargs=kwargs)
+        elif args or kwargs:
             raise ZenRuntimeError(
-                f"Class '{self.name}' takes no constructor arguments, got {len(args)}",
+                f"Class '{self.name}' takes no constructor arguments, got {len(args) + len(kwargs or [])}",
                 line,
                 col,
+                code="E006",
             )
         return instance
 
@@ -299,10 +459,12 @@ class Interpreter:
         base_dir: Path | None = None,
         *,
         stderr: io.TextIOBase | None = None,
+        stdin: io.TextIOBase | None = None,
         max_depth: int = 10000,
     ) -> None:
         self.stdout = stdout if stdout is not None else sys.stdout
         self.stderr = stderr if stderr is not None else sys.stderr
+        self.stdin = stdin if stdin is not None else sys.stdin
         self.max_depth = max(1, int(max_depth))
         self._call_depth = 0
         self._current_fn = "<module>"
@@ -403,6 +565,24 @@ class Interpreter:
             val = self.evaluate(node.value, env)
             env.define(node.name, val, is_const=True)
             return
+        if isinstance(node, ast.UnpackStmt):
+            seq = self.evaluate(node.value, env)
+            if not isinstance(seq, (list, tuple)):
+                raise ZenRuntimeError(f"Cannot unpack value of type '{zen_type(seq)}'", node.line, node.column, code="E004")
+            if len(seq) != len(node.names):
+                raise ZenRuntimeError(f"Expected {len(node.names)} values to unpack, got {len(seq)}", node.line, node.column, code="E008")
+            for name, item in zip(node.names, seq):
+                env.define(name, item, is_const=node.is_const)
+            return
+        if isinstance(node, ast.UnpackAssignStmt):
+            seq = self.evaluate(node.value, env)
+            if not isinstance(seq, (list, tuple)):
+                raise ZenRuntimeError(f"Cannot unpack value of type '{zen_type(seq)}'", node.line, node.column, code="E004")
+            if len(seq) != len(node.targets):
+                raise ZenRuntimeError(f"Expected {len(node.targets)} values to unpack, got {len(seq)}", node.line, node.column, code="E008")
+            for target, item in zip(node.targets, seq):
+                self._assign_target(target, item, env)
+            return
         if isinstance(node, ast.AssignStmt):
             val = self.evaluate(node.value, env)
             self._assign_target(node.target, val, env)
@@ -489,6 +669,17 @@ class Interpreter:
                 except _BreakSignal:
                     break
             return
+        if isinstance(node, ast.TryStmt):
+            try:
+                self.execute_block(node.try_block, Environment(env))
+            except ZenRuntimeError as exc:
+                catch_env = Environment(env)
+                catch_env.define(node.catch_var, make_error_instance(exc, node.line))
+                self.execute_block(node.catch_block, catch_env)
+            return
+        if isinstance(node, ast.RaiseStmt):
+            val = self.evaluate(node.value, env)
+            raise ZenRuntimeError(zen_format(val), node.line, node.column, code="E012")
         if isinstance(node, ast.ReturnStmt):
             val = None if node.value is None else self.evaluate(node.value, env)
             raise _ReturnSignal(val)
@@ -509,7 +700,7 @@ class Interpreter:
         if target in self._module_cache:
             module = self._module_cache[target]
         else:
-            mod_interp = Interpreter(stdout=self.stdout, base_dir=target.parent, stderr=self.stderr, max_depth=self.max_depth)
+            mod_interp = Interpreter(stdout=self.stdout, base_dir=target.parent, stderr=self.stderr, stdin=self.stdin, max_depth=self.max_depth)
             # Share core/registered globals builtins & module cache
             mod_interp._module_cache = self._module_cache
             for k, bval in self._builtin_values.items():
@@ -590,6 +781,30 @@ class Interpreter:
             return env.get(node.name, node.line, node.column)
         if isinstance(node, ast.ListExpr):
             return [self.evaluate(el, env) for el in node.elements]
+        if isinstance(node, ast.ListCompExpr):
+            iterable = self.evaluate(node.iterable, env)
+            if isinstance(iterable, str):
+                items = list(iterable)
+            elif isinstance(iterable, (list, range)):
+                items = iterable
+            elif isinstance(iterable, ZenArray):
+                items = [iterable.get_item(i) for i in range(iterable.shape[0])]
+            elif isinstance(iterable, dict):
+                items = list(iterable.keys())
+            else:
+                raise ZenRuntimeError(f"Cannot iterate over value of type '{zen_type(iterable)}'", node.line, node.column, code="E004")
+            out_list: list[Any] = []
+            for item in items:
+                comp_env = Environment(env)
+                comp_env.define(node.var_name, item)
+                if node.condition is None or is_truthy(self.evaluate(node.condition, comp_env)):
+                    out_list.append(self.evaluate(node.element, comp_env))
+            return out_list
+        if isinstance(node, ast.IfExpr):
+            for cond_node, block in node.branches:
+                if is_truthy(self.evaluate(cond_node, env)):
+                    return self._eval_expr_block(block, Environment(env))
+            return self._eval_expr_block(node.else_block, Environment(env))
         if isinstance(node, ast.MapExpr):
             result: dict[Any, Any] = {}
             for k_node, v_node in node.entries:
@@ -615,7 +830,8 @@ class Interpreter:
         if isinstance(node, ast.CallExpr):
             callee = self.evaluate(node.callee, env)
             args = [self.evaluate(a, env) for a in node.args]
-            return self._call_value(callee, args, node.line, node.column)
+            kw = [(k, self.evaluate(v, env)) for k, v in node.kwargs] if node.kwargs else None
+            return self._call_value(callee, args, node.line, node.column, kwargs=kw)
         if isinstance(node, ast.IndexExpr):
             container = self.evaluate(node.target, env)
             idx = self.evaluate(node.index, env)
@@ -628,21 +844,46 @@ class Interpreter:
                 return self._tensor_member(obj, node.member, node.line, node.column)
             if isinstance(obj, ZenArray):
                 return self._array_member(obj, node.member, node.line, node.column)
+            if isinstance(obj, str):
+                return str_member(obj, node.member, ZenBuiltin, node.line, node.column)
+            if isinstance(obj, list):
+                return list_member(obj, node.member, ZenBuiltin, node.line, node.column)
             raise ZenRuntimeError(
                 f"Cannot access member '{node.member}' on '{zen_type(obj)}'",
                 node.line,
                 node.column,
+                code="E003",
             )
         raise ZenRuntimeError(f"Unsupported expression node: {type(node).__name__}", node.line, node.column)
 
-    def _call_value(self, callee: Any, args: list[Any], line: int, col: int) -> Any:
+    def _eval_expr_block(self, block: ast.Block, env: Environment) -> Any:
+        stmts = block.statements
+        if stmts and isinstance(stmts[-1], ast.ExprStmt):
+            for s in stmts[:-1]:
+                self.execute(s, env)
+            return self.evaluate(stmts[-1].expression, env)
+        for s in stmts:
+            self.execute(s, env)
+        return None
+
+    def _call_value(
+        self,
+        callee: Any,
+        args: list[Any],
+        line: int,
+        col: int,
+        kwargs: list[tuple[str, Any]] | None = None,
+    ) -> Any:
         if isinstance(callee, ZenInstance):
             m = callee.klass.find_method("__call__")
             if m is not None:
-                return m.call(self, args, line, col, bound_self=callee)
-        if isinstance(callee, (ZenBuiltin, ZenFunction, ZenBoundMethod, ZenClass)):
-            return callee.call(self, args, line, col)
-        raise ZenRuntimeError(f"Value of type '{zen_type(callee)}' is not callable", line, col)
+                return m.call(self, args, line, col, bound_self=callee, kwargs=kwargs)
+        if isinstance(callee, ZenBuiltin):
+            kw_dict = dict(kwargs) if kwargs else None
+            return callee.call(self, args, line, col, kwargs=kw_dict)
+        if isinstance(callee, (ZenFunction, ZenBoundMethod, ZenClass)):
+            return callee.call(self, args, line, col, kwargs=kwargs)
+        raise ZenRuntimeError(f"Value of type '{zen_type(callee)}' is not callable", line, col, code="E004")
 
     def _tensor_member(self, t: ZenTensor, member: str, line: int, col: int) -> Any:
         if member == "shape":
@@ -833,6 +1074,38 @@ class Interpreter:
                 return left.mul(right) if isinstance(left, ZenTensor) else right.mul(left)
             if op == "/":
                 return left.div(right) if isinstance(left, ZenTensor) else right.rdiv(left)
+
+        if op in ("in", "not in"):
+            if isinstance(right, str):
+                if not isinstance(left, str):
+                    raise ZenRuntimeError(
+                        f"Operator '{op}' on string requires string on left, got '{zen_type(left)}'",
+                        node.line,
+                        node.column,
+                        code="E004",
+                    )
+                found = left in right
+            elif isinstance(right, list):
+                found = left in right
+            elif isinstance(right, dict):
+                if isinstance(left, (list, dict)):
+                    found = False
+                else:
+                    found = left in right
+            else:
+                raise ZenRuntimeError(
+                    f"Operator '{op}' requires list, string, or map on right, got '{zen_type(right)}'",
+                    node.line,
+                    node.column,
+                    code="E004",
+                )
+            return found if op == "in" else not found
+
+        if op == "*":
+            if isinstance(left, str) and isinstance(right, int) and not isinstance(right, bool):
+                return left * right
+            if isinstance(right, str) and isinstance(left, int) and not isinstance(left, bool):
+                return right * left
 
         if op == "+":
             if isinstance(left, str) and isinstance(right, str):

@@ -33,6 +33,8 @@ class Op(IntEnum):
     BUILD_TUPLE = auto()     # arg: count
     BUILD_FSTRING = auto()   # arg: part count
     BUILD_SLICE = auto()
+    LIST_APPEND = auto()     # arg: stack offset below TOS
+    UNPACK_SEQ = auto()      # arg: count (pushes items in reverse or stores?) -> pushes reversed so TOS = first item
     GET_INDEX = auto()
     SET_INDEX = auto()
     GET_MEMBER = auto()      # arg: name
@@ -50,10 +52,14 @@ class Op(IntEnum):
     GET_ITER = auto()
     FOR_ITER = auto()        # arg: target ip (pushes next item, or pops iter & jumps)
 
-    # Functions, classes, modules, output
+    # Functions, classes, modules, output, exceptions
     MAKE_CLOSURE = auto()    # arg: CodeObject
     CALL = auto()            # arg: argc
+    CALL_KW = auto()         # arg: (pos_argc, kw_names_tuple)
     RETURN = auto()
+    PUSH_TRY = auto()        # arg: catch_ip
+    POP_TRY = auto()
+    RAISE = auto()
     BUILD_CLASS = auto()     # arg: (class_name, method_names_tuple)
     IMPORT = auto()          # arg: (path, alias)
     SAY = auto()             # arg: count

@@ -68,6 +68,7 @@ class FnType(ZType):
     min_args: int = 0
     max_args: int | None = None
     is_method: bool = False
+    param_names: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -229,6 +230,7 @@ def _builtin_bindings() -> dict[str, _Binding]:
         "chars": fn(1, 1, LIST),
         "ord": fn(1, 1, INT),
         "chr": fn(1, 1, STRING),
+        "input": fn(0, 1, STRING),
         "keys": fn(1, 1, LIST),
         "values": fn(1, 1, LIST),
         "slice": fn(2, 3, ANY),
@@ -375,6 +377,41 @@ class TypeChecker:
                 scope.define(node.name, inferred, is_const=is_const)
             return
 
+        if isinstance(node, ast.UnpackStmt):
+            self._check_expr(node.value, scope)
+            for name in node.names:
+                self._declared_vars.append((node.line, name))
+                scope.define(name, ANY, is_const=node.is_const)
+            return
+
+        if isinstance(node, ast.UnpackAssignStmt):
+            self._check_expr(node.value, scope)
+            for target in node.targets:
+                if isinstance(target, ast.VarExpr):
+                    b = scope.lookup(target.name)
+                    if b is None:
+                        hint = did_you_mean(target.name, scope.all_names())
+                        suffix = f". Did you mean '{hint}'?" if hint else ""
+                        raise ZenTypeError(
+                            f"Cannot assign to undefined variable '{target.name}'{suffix}",
+                            target.line,
+                            target.column,
+                            code="E002",
+                        )
+                    if b.is_const:
+                        raise ZenTypeError(
+                            f"Cannot reassign constant '{target.name}'",
+                            target.line,
+                            target.column,
+                            code="E005",
+                        )
+                elif isinstance(target, ast.IndexExpr):
+                    self._check_expr(target.target, scope)
+                    self._check_expr(target.index, scope)
+                elif isinstance(target, ast.MemberExpr):
+                    self._check_expr(target.target, scope)
+            return
+
         if isinstance(node, ast.AssignStmt):
             val_type = self._check_expr(node.value, scope)
             target = node.target
@@ -501,6 +538,20 @@ class TypeChecker:
             loop_scope.define(node.var_name, STRING if iter_type == STRING else ANY)
             for s in node.body.statements:
                 self._check_stmt(s, loop_scope, expected_ret, True, collected_returns=collected_returns)
+            return
+
+        if isinstance(node, ast.TryStmt):
+            self._check_block(node.try_block, scope, expected_ret, in_loop, collected_returns=collected_returns)
+            catch_scope = _Scope(scope)
+            err_cls = ClassType("Error", fields={"message": STRING, "line": INT, "code": STRING})
+            catch_scope.define(node.catch_var, InstanceType("Error", err_cls))
+            self._declared_vars.append((node.catch_block.line, node.catch_var))
+            for s in node.catch_block.statements:
+                self._check_stmt(s, catch_scope, expected_ret, in_loop, collected_returns=collected_returns)
+            return
+
+        if isinstance(node, ast.RaiseStmt):
+            self._check_expr(node.value, scope)
             return
 
         if isinstance(node, ast.ReturnStmt):
@@ -643,7 +694,7 @@ class TypeChecker:
         num_defaults = sum(1 for d in (node.defaults or []) if d is not None)
         min_arity = max(0, max_arity - num_defaults)
         fn_name = node.name if isinstance(node, ast.FnDecl) else "<lambda>"
-        return FnType(fn_name, tuple(p_types), ret_t, min_arity, max_arity, is_method=is_method)
+        return FnType(fn_name, tuple(p_types), ret_t, min_arity, max_arity, is_method=is_method, param_names=tuple(node.params))
 
     def _check_fn_body(
         self,
@@ -693,6 +744,7 @@ class TypeChecker:
                 fn_type.min_args,
                 fn_type.max_args,
                 is_method=fn_type.is_method,
+                param_names=fn_type.param_names,
             )
             if self_type is not None:
                 self_type.klass.methods[node.name] = updated
@@ -730,6 +782,17 @@ class TypeChecker:
         else:
             for k, b in mod.exports.items():
                 scope.bindings[k] = b
+
+    def _check_expr_block(self, block: ast.Block, parent_scope: _Scope) -> ZType:
+        scope = _Scope(parent_scope)
+        stmts = block.statements
+        if stmts and isinstance(stmts[-1], ast.ExprStmt):
+            for s in stmts[:-1]:
+                self._check_stmt(s, scope, expected_ret=None, in_loop=False)
+            return self._check_expr(stmts[-1].expression, scope)
+        for s in stmts:
+            self._check_stmt(s, scope, expected_ret=None, in_loop=False)
+        return NONE
 
     def _check_expr(self, node: ast.Node, scope: _Scope) -> ZType:
         if isinstance(node, ast.Literal):
@@ -771,6 +834,44 @@ class TypeChecker:
                 self._check_expr(el, scope)
             return LIST
 
+        if isinstance(node, ast.ListCompExpr):
+            iter_type = self._check_expr(node.iterable, scope)
+            if iter_type not in (ANY, LIST, MAP, STRING, ARRAY):
+                raise ZenTypeError(
+                    f"Cannot iterate over value of type '{iter_type}'",
+                    node.iterable.line,
+                    node.iterable.column,
+                    code="E004",
+                )
+            comp_scope = _Scope(scope)
+            comp_scope.define(node.var_name, STRING if iter_type == STRING else ANY)
+            self._declared_vars.append((node.line, node.var_name))
+            if node.condition is not None:
+                self._check_expr(node.condition, comp_scope)
+            self._check_expr(node.element, comp_scope)
+            return LIST
+
+        if isinstance(node, ast.IfExpr):
+            branch_types: list[ZType] = []
+            restores: list[tuple[_Binding, ZType]] = []
+            try:
+                for cond, block in node.branches:
+                    self._check_expr(cond, scope)
+                    then_n, else_n = self._extract_narrowings(cond, scope)
+                    saved_then = self._apply_narrowings(then_n, scope)
+                    try:
+                        branch_types.append(self._check_expr_block(block, scope))
+                    finally:
+                        self._restore_narrowings(saved_then)
+                    restores.extend(self._apply_narrowings(else_n, scope))
+                branch_types.append(self._check_expr_block(node.else_block, scope))
+            finally:
+                self._restore_narrowings(restores)
+            res = branch_types[0]
+            for bt in branch_types[1:]:
+                res = _join_types(res, bt)
+            return res
+
         if isinstance(node, ast.MapExpr):
             for k, v in node.entries:
                 kt = self._check_expr(k, scope)
@@ -801,7 +902,8 @@ class TypeChecker:
         if isinstance(node, ast.CallExpr):
             callee_t = self._check_expr(node.callee, scope)
             arg_types = [self._check_expr(a, scope) for a in node.args]
-            return self._check_call(callee_t, arg_types, node)
+            kw_types = [(k, self._check_expr(v, scope), v) for k, v in (node.kwargs or [])]
+            return self._check_call(callee_t, arg_types, kw_types, node)
 
         if isinstance(node, ast.SliceExpr):
             if node.start is not None:
@@ -929,42 +1031,151 @@ class TypeChecker:
                     "tanh": FnType("tanh", None, TENSOR, 0, 0),
                 }
                 if node.member not in tensor_members:
-                    raise ZenTypeError(f"Tensor has no member '{node.member}'", node.line, node.column)
+                    hint = did_you_mean(node.member, tensor_members.keys())
+                    suffix = f". Did you mean '{hint}'?" if hint else ""
+                    raise ZenTypeError(f"Tensor has no member '{node.member}'{suffix}", node.line, node.column, code="E003")
                 return tensor_members[node.member]
+            if obj_t == STRING:
+                str_members: dict[str, ZType] = {
+                    "split": FnType("split", None, LIST, 0, 1),
+                    "join": FnType("join", None, STRING, 1, 1),
+                    "upper": FnType("upper", None, STRING, 0, 0),
+                    "lower": FnType("lower", None, STRING, 0, 0),
+                    "strip": FnType("strip", None, STRING, 0, 1),
+                    "replace": FnType("replace", None, STRING, 2, 3),
+                    "startswith": FnType("startswith", None, BOOL, 1, 1),
+                    "endswith": FnType("endswith", None, BOOL, 1, 1),
+                    "find": FnType("find", None, INT, 1, 3),
+                }
+                if node.member not in str_members:
+                    hint = did_you_mean(node.member, str_members.keys())
+                    suffix = f". Did you mean '{hint}'?" if hint else ""
+                    raise ZenTypeError(f"String has no member '{node.member}'{suffix}", node.line, node.column, code="E003")
+                return str_members[node.member]
+            if obj_t == LIST:
+                list_members: dict[str, ZType] = {
+                    "append": FnType("append", None, NONE, 1, 1),
+                    "pop": FnType("pop", None, ANY, 0, 1),
+                    "sort": FnType("sort", None, NONE, 0, 1),
+                    "reverse": FnType("reverse", None, NONE, 0, 0),
+                    "index": FnType("index", None, INT, 1, 1),
+                }
+                if node.member not in list_members:
+                    hint = did_you_mean(node.member, list_members.keys())
+                    suffix = f". Did you mean '{hint}'?" if hint else ""
+                    raise ZenTypeError(f"List has no member '{node.member}'{suffix}", node.line, node.column, code="E003")
+                return list_members[node.member]
             raise ZenTypeError(
                 f"Cannot access member '{node.member}' on type '{obj_t}'",
                 node.line,
                 node.column,
+                code="E003",
             )
 
         return ANY
 
-    def _check_call(self, callee_t: ZType, arg_types: list[ZType], node: ast.CallExpr) -> ZType:
+    def _check_call(
+        self,
+        callee_t: ZType,
+        arg_types: list[ZType],
+        kw_types: list[tuple[str, ZType, ast.Node]],
+        node: ast.CallExpr,
+    ) -> ZType:
         if callee_t is ANY:
             return ANY
         if isinstance(callee_t, ClassType):
             init_m = callee_t.find_method("init")
             if init_m is not None:
-                self._check_fn_args(init_m, arg_types, node)
-            elif arg_types:
+                self._check_fn_args(init_m, arg_types, kw_types, node)
+            elif arg_types or kw_types:
                 raise ZenTypeError(
-                    f"Class '{callee_t.name}' takes no constructor arguments, got {len(arg_types)}",
+                    f"Class '{callee_t.name}' takes no constructor arguments, got {len(arg_types) + len(kw_types)}",
                     node.line,
                     node.column,
+                    code="E006",
                 )
             return InstanceType(callee_t.name, callee_t)
         if isinstance(callee_t, FnType):
-            self._check_fn_args(callee_t, arg_types, node)
+            self._check_fn_args(callee_t, arg_types, kw_types, node)
             return callee_t.ret
         if isinstance(callee_t, InstanceType):
             call_m = callee_t.klass.find_method("__call__")
             if call_m is not None:
-                self._check_fn_args(call_m, arg_types, node)
+                self._check_fn_args(call_m, arg_types, kw_types, node)
                 return call_m.ret
-            raise ZenTypeError(f"Value of type '{callee_t}' is not callable", node.line, node.column)
-        raise ZenTypeError(f"Value of type '{callee_t}' is not callable", node.line, node.column)
+            raise ZenTypeError(f"Value of type '{callee_t}' is not callable", node.line, node.column, code="E004")
+        raise ZenTypeError(f"Value of type '{callee_t}' is not callable", node.line, node.column, code="E004")
 
-    def _check_fn_args(self, fn_t: FnType, arg_types: list[ZType], node: ast.CallExpr) -> None:
+    def _check_fn_args(
+        self,
+        fn_t: FnType,
+        arg_types: list[ZType],
+        kw_types: list[tuple[str, ZType, ast.Node]],
+        node: ast.CallExpr,
+    ) -> None:
+        if kw_types and fn_t.param_names is not None:
+            offset = 1 if fn_t.is_method and fn_t.param_names else 0
+            valid_params = fn_t.param_names[offset:]
+            if len(arg_types) > len(valid_params):
+                raise ZenTypeError(
+                    f"Function '{fn_t.name}' expected at most {len(valid_params)} argument(s), got {len(arg_types) + len(kw_types)}",
+                    node.line,
+                    node.column,
+                    code="E006",
+                )
+            bound_pos: dict[int, ZType] = {i: t for i, t in enumerate(arg_types)}
+            param_index = {name: i for i, name in enumerate(valid_params)}
+            for kname, kt, knode in kw_types:
+                if kname not in param_index:
+                    hint = did_you_mean(kname, valid_params)
+                    suffix = f". Did you mean '{hint}'?" if hint else ""
+                    raise ZenTypeError(
+                        f"Function '{fn_t.name}' got unexpected keyword argument '{kname}'{suffix}",
+                        knode.line,
+                        knode.column,
+                        code="E006",
+                    )
+                idx = param_index[kname]
+                if idx in bound_pos:
+                    raise ZenTypeError(
+                        f"Function '{fn_t.name}' got multiple values for argument '{kname}'",
+                        knode.line,
+                        knode.column,
+                        code="E006",
+                    )
+                bound_pos[idx] = kt
+            for req in range(fn_t.min_args):
+                if req not in bound_pos:
+                    raise ZenTypeError(
+                        f"Function '{fn_t.name}' missing required argument '{valid_params[req]}'",
+                        node.line,
+                        node.column,
+                        code="E006",
+                    )
+            if fn_t.params is not None:
+                for idx, arg_t in bound_pos.items():
+                    param_t = fn_t.params[offset + idx]
+                    if not _is_assignable(param_t, arg_t):
+                        raise ZenTypeError(
+                            f"Argument '{valid_params[idx]}' of '{fn_t.name}' expected '{param_t}', got '{arg_t}'",
+                            node.line,
+                            node.column,
+                            code="E004",
+                        )
+            return
+
+        if kw_types:
+            # Builtin or unknown param names: accept keyword arguments dynamically
+            total_c = len(arg_types) + len(kw_types)
+            if fn_t.max_args is not None and total_c > fn_t.max_args:
+                raise ZenTypeError(
+                    f"Function '{fn_t.name}' expected at most {fn_t.max_args} argument(s), got {total_c}",
+                    node.line,
+                    node.column,
+                    code="E006",
+                )
+            return
+
         argc = len(arg_types)
         if argc < fn_t.min_args or (fn_t.max_args is not None and argc > fn_t.max_args):
             if fn_t.max_args == fn_t.min_args:
@@ -977,6 +1188,7 @@ class TypeChecker:
                 f"Function '{fn_t.name}' expected {exp} argument(s), got {argc}",
                 node.line,
                 node.column,
+                code="E006",
             )
         if fn_t.params is not None:
             offset = 1 if fn_t.is_method and fn_t.params else 0
@@ -987,6 +1199,7 @@ class TypeChecker:
                         f"Argument {i + 1} of '{fn_t.name}' expected '{param_t}', got '{arg_t}'",
                         node.args[i].line,
                         node.args[i].column,
+                        code="E004",
                     )
 
     def _check_binary(self, node: ast.BinaryExpr, scope: _Scope) -> ZType:
@@ -995,6 +1208,23 @@ class TypeChecker:
         op = node.op
 
         if op in ("==", "!="):
+            return BOOL
+        if op in ("in", "not in"):
+            if rt is not ANY:
+                if rt not in (LIST, MAP, STRING):
+                    raise ZenTypeError(
+                        f"Operator '{op}' requires list, string, or map on right, got '{rt}'",
+                        node.line,
+                        node.column,
+                        code="E004",
+                    )
+                if rt == STRING and lt not in (STRING, ANY):
+                    raise ZenTypeError(
+                        f"Operator '{op}' on string requires string on left, got '{lt}'",
+                        node.line,
+                        node.column,
+                        code="E004",
+                    )
             return BOOL
         if op in ("and", "or"):
             return lt if lt == rt else ANY
@@ -1010,6 +1240,9 @@ class TypeChecker:
             if op in ("<", "<=", ">", ">="):
                 return BOOL
             return ANY
+
+        if op == "*" and ((lt == STRING and rt == INT) or (lt == INT and rt == STRING)):
+            return STRING
 
         if op == "+":
             if lt == INT and rt == INT:

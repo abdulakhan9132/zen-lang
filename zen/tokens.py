@@ -37,6 +37,9 @@ class TokenType(Enum):
     IMPORT = auto()
     AS = auto()
     DIV = auto()
+    TRY = auto()
+    CATCH = auto()
+    RAISE = auto()
 
     # Operators
     PLUS = auto()       # +
@@ -96,6 +99,9 @@ KEYWORD_TOKENS: dict[str, TokenType] = {
     "import": TokenType.IMPORT,
     "as": TokenType.AS,
     "div": TokenType.DIV,
+    "try": TokenType.TRY,
+    "catch": TokenType.CATCH,
+    "raise": TokenType.RAISE,
 }
 
 TWO_CHAR_OPERATORS: dict[str, TokenType] = {

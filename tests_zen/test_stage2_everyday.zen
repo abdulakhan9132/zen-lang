@@ -1,0 +1,50 @@
+// Stage 2 self-tests: try/catch, raise, kwargs, in, if-expr, listcomp, methods, destructuring
+
+fn pair(a: int, b: int = 5) {
+    return a + b, a * b
+}
+let s, p = pair(3, b = 4)
+assert s == 7 and p == 12
+s, p = p, s
+assert s == 12 and p == 7
+
+let caught = ""
+try {
+    let x = 1 / 0
+} catch e {
+    caught = e.message
+}
+assert "Division by zero" in caught
+
+let r_msg = ""
+try {
+    raise "bad state"
+} catch err {
+    r_msg = err.message
+}
+assert r_msg == "bad state"
+
+let tag = if 10 > 5 { "big" } else { "small" }
+assert tag == "big"
+assert [x * x for x in range(5) if x > 1] == [4, 9, 16]
+
+assert "zen" in "hello zen"
+assert 2 in [1, 2, 3]
+assert "a" in {"a": 1}
+assert "ab" * 3 == "ababab"
+assert "a-b-c".split("-") == ["a", "b", "c"]
+assert ",".join(["x", "y"]) == "x,y"
+assert "  hi  ".strip().upper() == "HI"
+assert "hello".startswith("he") and "hello".endswith("lo")
+assert "hello".find("ll") == 2
+
+let arr = [3, 1, 2]
+arr.append(4)
+arr.sort()
+assert arr == [1, 2, 3, 4]
+assert arr.pop() == 4
+arr.reverse()
+assert arr == [3, 2, 1]
+assert arr.index(2) == 1
+
+say "Stage 2 everyday language self-tests passed"

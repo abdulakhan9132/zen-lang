@@ -1,0 +1,25 @@
+// Stage 2 Example: Everyday language ergonomics in ZEN
+fn minmax(items: list) {
+    let lo = items[0]
+    let hi = items[0]
+    for x in items {
+        lo = if x < lo { x } else { lo }
+        hi = if x > hi { x } else { hi }
+    }
+    return lo, hi
+}
+
+fn format_line(label: string, value: any, repeat: int = 1) -> string {
+    return (f"{label}: {value} " * repeat).strip()
+}
+
+let nums = [x * x for x in range(6) if x > 1]
+let lo, hi = minmax(nums)
+say format_line("squares", nums)
+say format_line("range", f"{lo}..{hi}", repeat = 2)
+
+try {
+    let bad = 10 / 0
+} catch e {
+    say f"Recovered from error on line {e.line}: {e.message}"
+}

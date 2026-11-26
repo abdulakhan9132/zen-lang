@@ -108,6 +108,20 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
             raise ZenRuntimeError("Division by zero", code="E007")
         return na // nb
 
+    def _input(prompt: Any = "") -> str:
+        from zen.interpreter import zen_format
+
+        p_str = "" if prompt is None else zen_format(prompt)
+        if p_str:
+            interp.stdout.write(p_str)
+            interp.stdout.flush()
+        in_stream = getattr(interp, "stdin", None)
+        if in_stream is None:
+            import sys as _sys
+            in_stream = _sys.stdin
+        line = in_stream.readline()
+        return line.rstrip("\r\n")
+
     def _seed(val: Any) -> None:
         _RECORDED_SEED.append(val)
         rng.seed(val)
@@ -516,6 +530,7 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
         "chars": _chars,
         "ord": _ord,
         "chr": _chr,
+        "input": _input,
         "keys": _keys,
         "values": _values,
         "slice": _slice,

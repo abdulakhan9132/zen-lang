@@ -28,6 +28,9 @@ KEYWORDS = frozenset({
     "import",
     "as",
     "div",
+    "try",
+    "catch",
+    "raise",
 })
 
 # Multi-character and single-character operators, grouped for maximal-munch lexing.
@@ -96,6 +99,7 @@ PLANNED_BUILTINS = {
         "chars",
         "ord",
         "chr",
+        "input",
         "read_file",
         "write_file",
     ),

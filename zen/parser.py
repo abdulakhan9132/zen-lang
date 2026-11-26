@@ -89,6 +89,10 @@ class Parser:
             return self._parse_while()
         if tok.type == TokenType.FOR:
             return self._parse_for()
+        if tok.type == TokenType.TRY:
+            return self._parse_try()
+        if tok.type == TokenType.RAISE:
+            return self._parse_raise()
         if tok.type == TokenType.RETURN:
             return self._parse_return()
         if tok.type == TokenType.BREAK:
@@ -115,18 +119,46 @@ class Parser:
             return base + "?"
         return base
 
-    def _parse_let(self) -> ast.LetStmt:
+    def _parse_rhs_or_tuple(self) -> ast.Node:
+        first = self._parse_expression()
+        if self._match(TokenType.COMMA):
+            elems = [first]
+            elems.append(self._parse_expression())
+            while self._match(TokenType.COMMA):
+                elems.append(self._parse_expression())
+            return ast.ListExpr(first.line, first.column, elems)
+        return first
+
+    def _parse_let(self) -> ast.Node:
         kw = self._advance()
         name = self._expect(TokenType.IDENT, "Expected variable name after 'let'")
+        if self._match(TokenType.COMMA):
+            names = [name.value]
+            names.append(self._expect(TokenType.IDENT, "Expected variable name in destructuring").value)
+            while self._match(TokenType.COMMA):
+                names.append(self._expect(TokenType.IDENT, "Expected variable name in destructuring").value)
+            self._expect(TokenType.EQ, "Expected '=' after destructuring names")
+            value = self._parse_rhs_or_tuple()
+            self._consume_optional_semicolon()
+            return ast.UnpackStmt(kw.line, kw.column, names, value, is_const=False)
         type_ann = self._parse_type_name() if self._match(TokenType.COLON) else None
         self._expect(TokenType.EQ, "Expected '=' after variable name")
         value = self._parse_expression()
         self._consume_optional_semicolon()
         return ast.LetStmt(kw.line, kw.column, name.value, value, type_ann)
 
-    def _parse_const(self) -> ast.ConstStmt:
+    def _parse_const(self) -> ast.Node:
         kw = self._advance()
         name = self._expect(TokenType.IDENT, "Expected constant name after 'const'")
+        if self._match(TokenType.COMMA):
+            names = [name.value]
+            names.append(self._expect(TokenType.IDENT, "Expected constant name in destructuring").value)
+            while self._match(TokenType.COMMA):
+                names.append(self._expect(TokenType.IDENT, "Expected constant name in destructuring").value)
+            self._expect(TokenType.EQ, "Expected '=' after destructuring names")
+            value = self._parse_rhs_or_tuple()
+            self._consume_optional_semicolon()
+            return ast.UnpackStmt(kw.line, kw.column, names, value, is_const=True)
         type_ann = self._parse_type_name() if self._match(TokenType.COLON) else None
         self._expect(TokenType.EQ, "Expected '=' after constant name")
         value = self._parse_expression()
@@ -264,6 +296,24 @@ class Parser:
         body = self._parse_block()
         return ast.ForStmt(kw.line, kw.column, var_tok.value, iterable, body)
 
+    def _parse_try(self) -> ast.TryStmt:
+        kw = self._advance()
+        try_block = self._parse_block()
+        self._expect(TokenType.CATCH, "Expected 'catch' after try block")
+        if self._match(TokenType.LPAREN):
+            catch_tok = self._expect(TokenType.IDENT, "Expected error variable name after 'catch ('")
+            self._expect(TokenType.RPAREN, "Expected ')' after catch variable")
+        else:
+            catch_tok = self._expect(TokenType.IDENT, "Expected error variable name after 'catch'")
+        catch_block = self._parse_block()
+        return ast.TryStmt(kw.line, kw.column, try_block, catch_tok.value, catch_block)
+
+    def _parse_raise(self) -> ast.RaiseStmt:
+        kw = self._advance()
+        val = self._parse_expression()
+        self._consume_optional_semicolon()
+        return ast.RaiseStmt(kw.line, kw.column, val)
+
     def _parse_return(self) -> ast.ReturnStmt:
         kw = self._advance()
         next_tok = self._peek()
@@ -271,12 +321,27 @@ class Parser:
             next_tok.type in (TokenType.RBRACE, TokenType.SEMICOLON, TokenType.EOF)
             or next_tok.line > kw.line
         )
-        value = None if has_no_value else self._parse_expression()
+        value = None if has_no_value else self._parse_rhs_or_tuple()
         self._consume_optional_semicolon()
         return ast.ReturnStmt(kw.line, kw.column, value)
 
     def _parse_expr_or_assign(self) -> ast.Node:
         expr = self._parse_expression()
+        if self._match(TokenType.COMMA):
+            if not isinstance(expr, (ast.VarExpr, ast.IndexExpr, ast.MemberExpr)):
+                raise ZenSyntaxError("Invalid assignment target", expr.line, expr.column)
+            targets = [expr]
+            while True:
+                t = self._parse_expression()
+                if not isinstance(t, (ast.VarExpr, ast.IndexExpr, ast.MemberExpr)):
+                    raise ZenSyntaxError("Invalid assignment target", t.line, t.column)
+                targets.append(t)
+                if not self._match(TokenType.COMMA):
+                    break
+            eq = self._expect(TokenType.EQ, "Expected '=' after assignment targets")
+            value = self._parse_rhs_or_tuple()
+            self._consume_optional_semicolon()
+            return ast.UnpackAssignStmt(expr.line, expr.column, targets, value)
         if eq := self._match(TokenType.EQ):
             if not isinstance(expr, (ast.VarExpr, ast.IndexExpr, ast.MemberExpr)):
                 raise ZenSyntaxError("Invalid assignment target", eq.line, eq.column)
@@ -314,9 +379,17 @@ class Parser:
 
     def _parse_comparison(self) -> ast.Node:
         expr = self._parse_term()
-        while op := self._match(TokenType.LT, TokenType.LT_EQ, TokenType.GT, TokenType.GT_EQ):
-            right = self._parse_term()
-            expr = ast.BinaryExpr(op.line, op.column, expr, op.value, right)
+        while True:
+            if op := self._match(TokenType.LT, TokenType.LT_EQ, TokenType.GT, TokenType.GT_EQ, TokenType.IN):
+                right = self._parse_term()
+                expr = ast.BinaryExpr(op.line, op.column, expr, op.value, right)
+            elif self._check(TokenType.NOT) and self._peek(1).type == TokenType.IN:
+                not_tok = self._advance()
+                self._advance()
+                right = self._parse_term()
+                expr = ast.BinaryExpr(not_tok.line, not_tok.column, expr, "not in", right)
+            else:
+                break
         return expr
 
     def _parse_term(self) -> ast.Node:
@@ -352,14 +425,31 @@ class Parser:
             if self._check(TokenType.LPAREN) and self._peek().line == self._previous().line:
                 lparen = self._advance()
                 args: list[ast.Node] = []
+                kwargs: list[tuple[str, ast.Node]] = []
+                seen_kw = False
+
+                def _one_arg() -> None:
+                    nonlocal seen_kw
+                    if self._check(TokenType.IDENT) and self._peek(1).type == TokenType.EQ:
+                        k_tok = self._advance()
+                        self._advance()  # '='
+                        k_val = self._parse_expression()
+                        kwargs.append((k_tok.value, k_val))
+                        seen_kw = True
+                    else:
+                        if seen_kw:
+                            bad = self._peek()
+                            raise ZenSyntaxError("Positional argument follows keyword argument", bad.line, bad.column)
+                        args.append(self._parse_expression())
+
                 if not self._check(TokenType.RPAREN):
-                    args.append(self._parse_expression())
+                    _one_arg()
                     while self._match(TokenType.COMMA):
                         if self._check(TokenType.RPAREN):
                             break
-                        args.append(self._parse_expression())
+                        _one_arg()
                 self._expect(TokenType.RPAREN, "Expected ')' after arguments")
-                expr = ast.CallExpr(lparen.line, lparen.column, expr, args)
+                expr = ast.CallExpr(lparen.line, lparen.column, expr, args, kwargs if kwargs else None)
             elif self._check(TokenType.LBRACKET) and self._peek().line == self._previous().line:
                 lbrack = self._advance()
                 items = [self._parse_subscript_item()]
@@ -463,6 +553,19 @@ class Parser:
         if tok.type == TokenType.IDENT:
             self._advance()
             return ast.VarExpr(tok.line, tok.column, tok.value)
+        if tok.type == TokenType.IF:
+            kw = self._advance()
+            branches: list[tuple[ast.Node, ast.Block]] = []
+            cond = self._parse_expression()
+            block = self._parse_block()
+            branches.append((cond, block))
+            while self._match(TokenType.ELIF):
+                e_cond = self._parse_expression()
+                e_block = self._parse_block()
+                branches.append((e_cond, e_block))
+            self._expect(TokenType.ELSE, "Expected 'else' branch in if-expression")
+            else_block = self._parse_block()
+            return ast.IfExpr(kw.line, kw.column, branches, else_block)
         if tok.type == TokenType.FN:
             kw = self._advance()
             params, param_types, defaults = self._parse_params()
@@ -499,11 +602,19 @@ class Parser:
             return ast.SliceExpr(tok.line, tok.column, start, stop, step)
         return start
 
-    def _parse_list(self) -> ast.ListExpr:
+    def _parse_list(self) -> ast.Node:
         lbrack = self._advance()
         elements: list[ast.Node] = []
         if not self._check(TokenType.RBRACKET):
-            elements.append(self._parse_expression())
+            first = self._parse_expression()
+            if self._match(TokenType.FOR):
+                var_tok = self._expect(TokenType.IDENT, "Expected loop variable in list comprehension")
+                self._expect(TokenType.IN, "Expected 'in' in list comprehension")
+                iterable = self._parse_expression()
+                cond = self._parse_expression() if self._match(TokenType.IF) else None
+                self._expect(TokenType.RBRACKET, "Expected ']' after list comprehension")
+                return ast.ListCompExpr(lbrack.line, lbrack.column, first, var_tok.value, iterable, cond)
+            elements.append(first)
             while self._match(TokenType.COMMA):
                 if self._check(TokenType.RBRACKET):
                     break

@@ -37,6 +37,19 @@ class ConstStmt(Node):
 
 
 @dataclass(frozen=True)
+class UnpackStmt(Node):
+    names: list[str]
+    value: Node
+    is_const: bool = False
+
+
+@dataclass(frozen=True)
+class UnpackAssignStmt(Node):
+    targets: list[Node]
+    value: Node
+
+
+@dataclass(frozen=True)
 class AssignStmt(Node):
     target: Node
     value: Node
@@ -115,6 +128,18 @@ class ExprStmt(Node):
     expression: Node
 
 
+@dataclass(frozen=True)
+class TryStmt(Node):
+    try_block: Block
+    catch_var: str
+    catch_block: Block
+
+
+@dataclass(frozen=True)
+class RaiseStmt(Node):
+    value: Node
+
+
 # --- Expressions ---
 
 @dataclass(frozen=True)
@@ -135,6 +160,20 @@ class VarExpr(Node):
 @dataclass(frozen=True)
 class ListExpr(Node):
     elements: list[Node]
+
+
+@dataclass(frozen=True)
+class ListCompExpr(Node):
+    element: Node
+    var_name: str
+    iterable: Node
+    condition: Node | None = None
+
+
+@dataclass(frozen=True)
+class IfExpr(Node):
+    branches: list[tuple[Node, Block]]
+    else_block: Block
 
 
 @dataclass(frozen=True)
@@ -168,6 +207,7 @@ class BinaryExpr(Node):
 class CallExpr(Node):
     callee: Node
     args: list[Node]
+    kwargs: list[tuple[str, Node]] | None = None
 
 
 @dataclass(frozen=True)

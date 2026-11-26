@@ -82,7 +82,7 @@
       "patterns": [
         {
           "name": "keyword.control.zen",
-          "match": "\\b(if|elif|else|while|for|in|return|break|continue|import|as)\\b"
+          "match": "\\b(if|elif|else|while|for|in|return|break|continue|import|as|try|catch|raise)\\b"
         },
         {
           "name": "keyword.operator.logical.zen",
@@ -98,7 +98,7 @@
         },
         {
           "name": "support.function.builtin.zen",
-          "match": "\\b(print|len|str|type|range|push|append|pop|map|filter|reduce|sqrt|exp|log|sin|cos|tanh|pow|abs|floor|floor_div|ceil|round|min|max|sum|mean|tensor|zeros|ones|tensor_rand|randn|shape|reshape|transpose|matmul|tolist|tensor_sum|tensor_mean|tensor_max|tensor_exp|tensor_log|tensor_tanh|tensor_gt|tensor_clamp_min|tensor_gather|tensor_scatter_add|seed|random|randint|uniform|int|float|split|join|trim|upper|lower|contains|replace|chars|ord|chr|keys|values|slice|read_file|write_file|file_exists|save_weights|load_weights|fields|_zennum_rt|assert|clock)\\b"
+          "match": "\\b(print|len|str|type|range|push|append|pop|map|filter|reduce|sqrt|exp|log|sin|cos|tanh|pow|abs|floor|floor_div|ceil|round|min|max|sum|mean|tensor|zeros|ones|tensor_rand|randn|shape|reshape|transpose|matmul|tolist|tensor_sum|tensor_mean|tensor_max|tensor_exp|tensor_log|tensor_tanh|tensor_gt|tensor_clamp_min|tensor_gather|tensor_scatter_add|seed|random|randint|uniform|int|float|split|join|trim|upper|lower|contains|replace|chars|ord|chr|input|keys|values|slice|read_file|write_file|file_exists|save_weights|load_weights|fields|_zennum_rt|assert|clock)\\b"
         }
       ]
     },

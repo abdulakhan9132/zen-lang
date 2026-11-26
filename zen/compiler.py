@@ -38,7 +38,8 @@ class _FunctionCompiler:
         self.slot_is_cell: list[bool] = []
         self.upvalues: list[tuple[bool, int]] = []
         self.upvalue_is_const: list[bool] = []
-        self.loops: list[tuple[int, list[int], int]] = []  # (continue_ip, break_patches, stack_depth_delta)
+        self.loops: list[tuple[int, list[int], int, int]] = []  # (continue_ip, break_patches, stack_depth_delta, try_depth)
+        self._try_depth: int = 0
 
         # Register parameters as local slots in scope 0
         for p in params:
@@ -149,11 +150,49 @@ class _FunctionCompiler:
                 self._emit(Op.DEFINE_GLOBAL, (node.name, is_const), node)
             else:
                 slot = self._alloc_local(node.name, is_const)
-                # Note: whether slot is a cell may only be decided later when inner fns compile;
-                # emit a placeholder or patch at finalize? Actually, we can emit DEFINE_CELL/STORE_LOCAL
-                # OR always emit a single opcode `STORE_NEW_LOCAL`? Wait: let's patch!
-                # Even cleaner: emit DEFINE_LOCAL_SLOT and patch to DEFINE_CELL in _finalize_cell_ops!
                 self._emit(Op.STORE_LOCAL, (slot, is_const, True), node)  # True = is_decl
+            return
+
+        if isinstance(node, ast.UnpackStmt):
+            self.compile_expr(node.value)
+            self._emit(Op.UNPACK_SEQ, len(node.names), node)
+            for name in node.names:
+                if self._is_module_top_level():
+                    self._emit(Op.DEFINE_GLOBAL, (name, node.is_const), node)
+                else:
+                    slot = self._alloc_local(name, node.is_const)
+                    self._emit(Op.STORE_LOCAL, (slot, node.is_const, True), node)
+            return
+
+        if isinstance(node, ast.UnpackAssignStmt):
+            self.compile_expr(node.value)
+            self._emit(Op.UNPACK_SEQ, len(node.targets), node)
+            for target in node.targets:
+                if isinstance(target, ast.VarExpr):
+                    info = self._resolve_var(target.name)
+                    if info.is_const:
+                        raise ZenRuntimeError(f"Cannot reassign constant '{target.name}'", target.line, target.column, code="E005")
+                    if info.kind == "local":
+                        self._emit(Op.STORE_LOCAL, (info.index, info.is_const, False), target)
+                    elif info.kind == "upvalue":
+                        self._emit(Op.STORE_UPVALUE, info.index, target)
+                    else:
+                        self._emit(Op.STORE_GLOBAL, info.index, target)
+                else:
+                    tmp_name = f"$unp_{id(target)}_{len(self.instructions)}"
+                    slot = self._alloc_local(tmp_name, False)
+                    self._emit(Op.STORE_LOCAL, (slot, False, True), target)
+                    if isinstance(target, ast.IndexExpr):
+                        self.compile_expr(target.target)
+                        self.compile_expr(target.index)
+                        self._emit(Op.LOAD_LOCAL, slot, target)
+                        self._emit(Op.SET_INDEX, None, target)
+                    elif isinstance(target, ast.MemberExpr):
+                        self.compile_expr(target.target)
+                        self._emit(Op.LOAD_LOCAL, slot, target)
+                        self._emit(Op.SET_MEMBER, target.member, target)
+                    else:
+                        raise ZenRuntimeError("Invalid assignment target", target.line, target.column)
             return
 
         if isinstance(node, ast.AssignStmt):
@@ -261,12 +300,12 @@ class _FunctionCompiler:
             loop_start = len(self.instructions)
             self.compile_expr(node.condition)
             exit_jump = self._emit(Op.JUMP_IF_FALSE, 0, node.condition)
-            self.loops.append((loop_start, [], 0))
+            self.loops.append((loop_start, [], 0, self._try_depth))
             self.compile_block(node.body)
             self._emit(Op.JUMP, loop_start, node)
             loop_end = len(self.instructions)
             self._patch(exit_jump, loop_end)
-            _, breaks, _ = self.loops.pop()
+            _, breaks, _, _ = self.loops.pop()
             for br in breaks:
                 self._patch(br, loop_end)
             return
@@ -279,14 +318,14 @@ class _FunctionCompiler:
             self._push_scope()
             slot = self._alloc_local(node.var_name, False)
             self._emit(Op.STORE_LOCAL, (slot, False, True), node)
-            self.loops.append((loop_start, [], 1))  # 1 iterator on stack
+            self.loops.append((loop_start, [], 1, self._try_depth))  # 1 iterator on stack
             for stmt in node.body.statements:
                 self.compile_stmt(stmt)
             self._pop_scope()
             self._emit(Op.JUMP, loop_start, node)
             loop_end = len(self.instructions)
             self._patch(for_iter, loop_end)
-            _, breaks, _ = self.loops.pop()
+            _, breaks, _, _ = self.loops.pop()
             if breaks:
                 # Normal loop exit skips POP; break jumps directly to POP to clean up iterator
                 skip_pop = self._emit(Op.JUMP, 0, node)
@@ -295,6 +334,29 @@ class _FunctionCompiler:
                     self._patch(br, pop_ip)
                 self._emit(Op.POP, None, node)
                 self._patch(skip_pop, len(self.instructions))
+            return
+
+        if isinstance(node, ast.TryStmt):
+            push_try = self._emit(Op.PUSH_TRY, 0, node)
+            self._try_depth += 1
+            self.compile_block(node.try_block)
+            self._try_depth -= 1
+            self._emit(Op.POP_TRY, None, node)
+            end_jump = self._emit(Op.JUMP, 0, node)
+            catch_ip = len(self.instructions)
+            self._patch(push_try, catch_ip)
+            self._push_scope()
+            slot = self._alloc_local(node.catch_var, False)
+            self._emit(Op.STORE_LOCAL, (slot, False, True), node)
+            for stmt in node.catch_block.statements:
+                self.compile_stmt(stmt)
+            self._pop_scope()
+            self._patch(end_jump, len(self.instructions))
+            return
+
+        if isinstance(node, ast.RaiseStmt):
+            self.compile_expr(node.value)
+            self._emit(Op.RAISE, None, node)
             return
 
         if isinstance(node, ast.ReturnStmt):
@@ -307,14 +369,18 @@ class _FunctionCompiler:
 
         if isinstance(node, ast.BreakStmt):
             if not self.loops:
-                raise ZenRuntimeError("'break' used outside of loop", node.line, node.column)
+                raise ZenRuntimeError("'break' used outside of loop", node.line, node.column, code="E011")
+            for _ in range(self._try_depth - self.loops[-1][3]):
+                self._emit(Op.POP_TRY, None, node)
             br = self._emit(Op.JUMP, 0, node)
             self.loops[-1][1].append(br)
             return
 
         if isinstance(node, ast.ContinueStmt):
             if not self.loops:
-                raise ZenRuntimeError("'continue' used outside of loop", node.line, node.column)
+                raise ZenRuntimeError("'continue' used outside of loop", node.line, node.column, code="E011")
+            for _ in range(self._try_depth - self.loops[-1][3]):
+                self._emit(Op.POP_TRY, None, node)
             cont_ip = self.loops[-1][0]
             self._emit(Op.JUMP, cont_ip, node)
             return
@@ -325,6 +391,19 @@ class _FunctionCompiler:
             return
 
         raise ZenRuntimeError(f"Unsupported statement in compiler: {type(node).__name__}", node.line, node.column)
+
+    def _compile_block_expr(self, block: ast.Block) -> None:
+        self._push_scope()
+        stmts = block.statements
+        if stmts and isinstance(stmts[-1], ast.ExprStmt):
+            for s in stmts[:-1]:
+                self.compile_stmt(s)
+            self.compile_expr(stmts[-1].expression)
+        else:
+            for s in stmts:
+                self.compile_stmt(s)
+            self._emit(Op.LOAD_CONST, None, block)
+        self._pop_scope()
 
     def _compile_function(self, name: str, params: list[str], body: ast.Block, num_defaults: int = 0) -> CodeObject:
         child = _FunctionCompiler(name, params, parent=self, is_module=False, num_defaults=num_defaults)
@@ -380,6 +459,43 @@ class _FunctionCompiler:
             for el in node.elements:
                 self.compile_expr(el)
             self._emit(Op.BUILD_LIST, len(node.elements), node)
+            return
+
+        if isinstance(node, ast.ListCompExpr):
+            self._emit(Op.BUILD_LIST, 0, node)
+            self.compile_expr(node.iterable)
+            self._emit(Op.GET_ITER, None, node)
+            loop_start = len(self.instructions)
+            for_iter = self._emit(Op.FOR_ITER, 0, node)
+            self._push_scope()
+            slot = self._alloc_local(node.var_name, False)
+            self._emit(Op.STORE_LOCAL, (slot, False, True), node)
+            if node.condition is not None:
+                self.compile_expr(node.condition)
+                skip = self._emit(Op.JUMP_IF_FALSE, 0, node.condition)
+                self.compile_expr(node.element)
+                self._emit(Op.LIST_APPEND, 2, node)
+                self._patch(skip, len(self.instructions))
+            else:
+                self.compile_expr(node.element)
+                self._emit(Op.LIST_APPEND, 2, node)
+            self._pop_scope()
+            self._emit(Op.JUMP, loop_start, node)
+            self._patch(for_iter, len(self.instructions))
+            return
+
+        if isinstance(node, ast.IfExpr):
+            end_jumps: list[int] = []
+            for cond, block in node.branches:
+                self.compile_expr(cond)
+                jf = self._emit(Op.JUMP_IF_FALSE, 0, cond)
+                self._compile_block_expr(block)
+                end_jumps.append(self._emit(Op.JUMP, 0, block))
+                self._patch(jf, len(self.instructions))
+            self._compile_block_expr(node.else_block)
+            end_ip = len(self.instructions)
+            for j in end_jumps:
+                self._patch(j, end_ip)
             return
 
         if isinstance(node, ast.MapExpr):
@@ -446,7 +562,12 @@ class _FunctionCompiler:
             self.compile_expr(node.callee)
             for a in node.args:
                 self.compile_expr(a)
-            self._emit(Op.CALL, len(node.args), node)
+            if node.kwargs:
+                for _, kv in node.kwargs:
+                    self.compile_expr(kv)
+                self._emit(Op.CALL_KW, (len(node.args), tuple(k for k, _ in node.kwargs)), node)
+            else:
+                self._emit(Op.CALL, len(node.args), node)
             return
 
         if isinstance(node, ast.IndexExpr):
