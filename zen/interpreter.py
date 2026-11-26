@@ -6,12 +6,14 @@ import io
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 from zen import ast
 from zen.builtins import register_phase4_builtins
 from zen.environment import Environment
-from zen.errors import ZenError, ZenRuntimeError
+from zen.errors import ZenError, ZenRuntimeError, did_you_mean
+from zen.lexer import tokenize_with_comments
 from zen.parser import parse
 from zen.paths import resolve_import_path
 from zen.tensor import ZenTensor
@@ -163,16 +165,37 @@ class ZenFunction:
                 f"Function '{self.name}' expected {exp} argument(s), got {len(args)}",
                 line,
                 col,
+                code="E006",
             )
         if len(actual_args) < total:
             actual_args = actual_args + list(self.defaults[len(actual_args) - min_total :])
+        if interpreter._call_depth + 1 > interpreter.max_depth:
+            raise ZenRuntimeError(
+                f"Maximum recursion depth ({interpreter.max_depth}) exceeded in '{self.name}' at depth {interpreter._call_depth + 1}",
+                line,
+                col,
+                code="E010",
+            )
         local_env = Environment(self.closure)
         for param, arg_val in zip(self.params, actual_args):
             local_env.define(param, arg_val)
+        prev_fn = interpreter._current_fn
+        interpreter._current_fn = self.name
+        interpreter._call_depth += 1
         try:
             interpreter.execute_block(self.body, local_env)
         except _ReturnSignal as ret:
             return ret.value
+        except RecursionError as exc:
+            raise ZenRuntimeError(
+                f"Maximum recursion depth exceeded in '{self.name}' at depth {interpreter._call_depth}",
+                interpreter.current_line or line,
+                col,
+                code="E010",
+            ) from exc
+        finally:
+            interpreter._call_depth -= 1
+            interpreter._current_fn = prev_fn
         return None
 
 
@@ -213,7 +236,9 @@ class ZenClass:
         m = self.find_method(name)
         if m is not None:
             return m
-        raise ZenRuntimeError(f"Class '{self.name}' has no method '{name}'", line, col)
+        hint = did_you_mean(name, self.methods.keys())
+        suffix = f". Did you mean '{hint}'?" if hint else ""
+        raise ZenRuntimeError(f"Class '{self.name}' has no method '{name}'{suffix}", line, col, code="E003")
 
     def call(self, interpreter: "Interpreter", args: list[Any], line: int, col: int) -> "ZenInstance":
         instance = ZenInstance(self)
@@ -242,10 +267,13 @@ class ZenInstance:
         method = self.klass.find_method(name)
         if method is not None:
             return ZenBoundMethod(self, method)
+        hint = did_you_mean(name, list(self.fields.keys()) + list(self.klass.methods.keys()))
+        suffix = f". Did you mean '{hint}'?" if hint else ""
         raise ZenRuntimeError(
-            f"'{self.klass.name}' instance has no field or method '{name}'",
+            f"'{self.klass.name}' instance has no field or method '{name}'{suffix}",
             line,
             col,
+            code="E003",
         )
 
 
@@ -257,14 +285,28 @@ class ZenModule:
     def get(self, member: str, line: int, col: int) -> Any:
         if member in self.exports:
             return self.exports[member]
-        raise ZenRuntimeError(f"Module '{self.name}' has no member '{member}'", line, col)
+        hint = did_you_mean(member, self.exports.keys())
+        suffix = f". Did you mean '{hint}'?" if hint else ""
+        raise ZenRuntimeError(f"Module '{self.name}' has no member '{member}'{suffix}", line, col, code="E003")
 
 
 class Interpreter:
     """Executes a parsed ZEN AST."""
 
-    def __init__(self, stdout: io.TextIOBase | None = None, base_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        stdout: io.TextIOBase | None = None,
+        base_dir: Path | None = None,
+        *,
+        stderr: io.TextIOBase | None = None,
+        max_depth: int = 10000,
+    ) -> None:
         self.stdout = stdout if stdout is not None else sys.stdout
+        self.stderr = stderr if stderr is not None else sys.stderr
+        self.max_depth = max(1, int(max_depth))
+        self._call_depth = 0
+        self._current_fn = "<module>"
+        self.current_line = 0
         self.base_dir = (base_dir or Path.cwd()).resolve()
         self.globals = Environment()
         self._module_cache: dict[Path, ZenModule] = {}
@@ -289,21 +331,57 @@ class Interpreter:
             return obj.shape[0] if obj.shape else 1
         raise ZenRuntimeError(f"Object of type '{zen_type(obj)}' has no len()")
 
+    def _emit_comment_warnings(self, source: str) -> None:
+        _, trailing = tokenize_with_comments(source)
+        for line_no, comment in trailing:
+            if not comment:
+                continue
+            if re.fullmatch(r"\d+(?:\.\d+)?", comment):
+                self.stderr.write(
+                    f"Warning [line {line_no}]: '// {comment}' is a comment, not integer division; use 'div' or 'floor_div(...)'.\n"
+                )
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", comment) and comment in self.globals.values:
+                self.stderr.write(
+                    f"Warning [line {line_no}]: '// {comment}' is a comment referring to variable '{comment}', not division; use 'div' or 'floor_div(...)'.\n"
+                )
+
     def run(self, source: str, file_path: Path | None = None, *, type_check: bool = False) -> Environment:
         prev_dir = self.base_dir
+        prev_rec = sys.getrecursionlimit()
         if file_path is not None:
             self.base_dir = file_path.resolve().parent
         try:
+            target_rec = max(prev_rec, min(self.max_depth * 6 + 1000, 30000))
+            if target_rec > prev_rec:
+                try:
+                    sys.setrecursionlimit(target_rec)
+                except (ValueError, RecursionError):
+                    pass
             program = parse(source)
             if type_check:
-                type_check_program(program, base_dir=self.base_dir, source=source)
+                type_check_program(program, base_dir=self.base_dir, source=source, stderr=self.stderr)
+            else:
+                self._emit_comment_warnings(source)
             for stmt in program.statements:
                 self.execute(stmt, self.globals)
             return self.globals
         except ZenError as exc:
             raise exc.with_source(source) from exc
+        except RecursionError as exc:
+            raise ZenRuntimeError(
+                f"Maximum recursion depth exceeded in '{self._current_fn}' at depth {self._call_depth}",
+                self.current_line,
+                1,
+                source=source,
+                code="E010",
+            ) from exc
         finally:
             self.base_dir = prev_dir
+            if sys.getrecursionlimit() != prev_rec:
+                try:
+                    sys.setrecursionlimit(prev_rec)
+                except (ValueError, RecursionError):
+                    pass
 
     def run_file(self, path: str | Path, *, type_check: bool = False) -> Environment:
         p = Path(path).resolve()
@@ -315,6 +393,8 @@ class Interpreter:
             self.execute(stmt, env)
 
     def execute(self, node: ast.Node, env: Environment) -> None:
+        if node.line:
+            self.current_line = node.line
         if isinstance(node, ast.LetStmt):
             val = self.evaluate(node.value, env)
             env.define(node.name, val, is_const=False)
@@ -429,7 +509,7 @@ class Interpreter:
         if target in self._module_cache:
             module = self._module_cache[target]
         else:
-            mod_interp = Interpreter(stdout=self.stdout, base_dir=target.parent)
+            mod_interp = Interpreter(stdout=self.stdout, base_dir=target.parent, stderr=self.stderr, max_depth=self.max_depth)
             # Share core/registered globals builtins & module cache
             mod_interp._module_cache = self._module_cache
             for k, bval in self._builtin_values.items():
@@ -497,8 +577,15 @@ class Interpreter:
         raise ZenRuntimeError("Invalid assignment target", target.line, target.column)
 
     def evaluate(self, node: ast.Node, env: Environment) -> Any:
+        if node.line:
+            self.current_line = node.line
         if isinstance(node, ast.Literal):
             return node.value
+        if isinstance(node, ast.FStringExpr):
+            return "".join(
+                part if isinstance(part, str) else zen_format(self.evaluate(part, env))
+                for part in node.parts
+            )
         if isinstance(node, ast.VarExpr):
             return env.get(node.name, node.line, node.column)
         if isinstance(node, ast.ListExpr):
@@ -760,12 +847,13 @@ class Interpreter:
                 node.column,
             )
 
-        if op in ("-", "*", "/", "%", "**", "<", "<=", ">", ">="):
+        if op in ("-", "*", "/", "div", "%", "**", "<", "<=", ">", ">="):
             if not (_is_number(left) and _is_number(right)):
                 raise ZenRuntimeError(
                     f"Operator '{op}' requires numbers, got '{zen_type(left)}' and '{zen_type(right)}'",
                     node.line,
                     node.column,
+                    code="E004",
                 )
             if op == "-":
                 return left - right
@@ -773,11 +861,15 @@ class Interpreter:
                 return left * right
             if op == "/":
                 if right == 0:
-                    raise ZenRuntimeError("Division by zero", node.line, node.column)
+                    raise ZenRuntimeError("Division by zero", node.line, node.column, code="E007")
                 return left / right
+            if op == "div":
+                if right == 0:
+                    raise ZenRuntimeError("Division by zero", node.line, node.column, code="E007")
+                return left // right
             if op == "%":
                 if right == 0:
-                    raise ZenRuntimeError("Modulo by zero", node.line, node.column)
+                    raise ZenRuntimeError("Modulo by zero", node.line, node.column, code="E007")
                 return left % right
             if op == "**":
                 return left ** right

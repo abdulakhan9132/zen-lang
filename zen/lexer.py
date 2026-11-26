@@ -28,6 +28,8 @@ class Lexer:
         self.pos = 0
         self.line = 1
         self.column = 1
+        self.trailing_comments: list[tuple[int, str]] = []
+        self._last_token_line = 0
 
     def _peek(self, offset: int = 0) -> str:
         idx = self.pos + offset
@@ -51,8 +53,14 @@ class Lexer:
             if ch in " \t\r\n":
                 self._advance()
             elif ch == "/" and self._peek(1) == "/":
+                comment_line = self.line
+                self._advance()
+                self._advance()
+                comment_chars: list[str] = []
                 while self.pos < self.length and self._peek() != "\n":
-                    self._advance()
+                    comment_chars.append(self._advance())
+                if self._last_token_line == comment_line:
+                    self.trailing_comments.append((comment_line, "".join(comment_chars).strip()))
             else:
                 break
 
@@ -108,6 +116,63 @@ class Lexer:
                 chars.append(self._advance())
         raise ZenSyntaxError("Unterminated string literal", start_line, start_col)
 
+    def _scan_fstring(self, start_line: int, start_col: int) -> Token:
+        self._advance()  # 'f'
+        self._advance()  # opening '"'
+        chars: list[str] = []
+        brace_depth = 0
+        in_inner_str = False
+        while self.pos < self.length:
+            ch = self._peek()
+            if ch == '"' and brace_depth == 0:
+                self._advance()
+                return Token(TokenType.FSTRING, "".join(chars), start_line, start_col)
+            if ch == "\n":
+                raise ZenSyntaxError("Unterminated f-string literal", start_line, start_col)
+            if ch == "\\" and brace_depth == 0:
+                self._advance()
+                if self.pos >= self.length:
+                    raise ZenSyntaxError("Unterminated escape sequence in f-string", start_line, start_col)
+                esc = self._advance()
+                if esc not in ESCAPE_MAP:
+                    raise ZenSyntaxError(f"Unknown escape sequence '\\{esc}'", self.line, self.column - 1)
+                chars.append(ESCAPE_MAP[esc])
+                continue
+            if brace_depth > 0:
+                if ch == '"' and not in_inner_str:
+                    in_inner_str = True
+                elif ch == '"' and in_inner_str:
+                    in_inner_str = False
+                elif ch == "\\" and in_inner_str:
+                    chars.append(self._advance())
+                    if self.pos < self.length:
+                        chars.append(self._advance())
+                    continue
+                elif not in_inner_str:
+                    if ch == "{":
+                        brace_depth += 1
+                    elif ch == "}":
+                        brace_depth -= 1
+                chars.append(self._advance())
+            else:
+                if ch == "{":
+                    if self._peek(1) == "{":
+                        self._advance()
+                        self._advance()
+                        chars.append("{{")
+                    else:
+                        brace_depth = 1
+                        chars.append(self._advance())
+                elif ch == "}" and self._peek(1) == "}":
+                    self._advance()
+                    self._advance()
+                    chars.append("}}")
+                elif ch == "}":
+                    raise ZenSyntaxError("Single '}' is not allowed in f-string", self.line, self.column)
+                else:
+                    chars.append(self._advance())
+        raise ZenSyntaxError("Unterminated f-string literal", start_line, start_col)
+
     def _scan_ident_or_keyword(self, start_line: int, start_col: int) -> Token:
         chars: list[str] = []
         while self.pos < self.length and (self._peek().isalnum() or self._peek() == "_"):
@@ -134,31 +199,53 @@ class Lexer:
             start_col = self.column
             ch = self._peek()
 
+            if ch == "f" and self._peek(1) == '"':
+                tok = self._scan_fstring(start_line, start_col)
+                self._last_token_line = tok.line
+                tokens.append(tok)
+                continue
+
             if ch.isdigit():
-                tokens.append(self._scan_number(start_line, start_col))
+                tok = self._scan_number(start_line, start_col)
+                self._last_token_line = tok.line
+                tokens.append(tok)
                 continue
 
             if ch == '"':
-                tokens.append(self._scan_string(start_line, start_col))
+                tok = self._scan_string(start_line, start_col)
+                self._last_token_line = tok.line
+                tokens.append(tok)
                 continue
 
             if ch.isalpha() or ch == "_":
-                tokens.append(self._scan_ident_or_keyword(start_line, start_col))
+                tok = self._scan_ident_or_keyword(start_line, start_col)
+                self._last_token_line = tok.line
+                tokens.append(tok)
                 continue
 
             two = ch + self._peek(1)
             if two in TWO_CHAR_OPERATORS:
                 self._advance()
                 self._advance()
-                tokens.append(Token(TWO_CHAR_OPERATORS[two], two, start_line, start_col))
+                tok = Token(TWO_CHAR_OPERATORS[two], two, start_line, start_col)
+                self._last_token_line = tok.line
+                tokens.append(tok)
                 continue
 
             if ch in SINGLE_CHAR_TOKENS:
                 self._advance()
-                tokens.append(Token(SINGLE_CHAR_TOKENS[ch], ch, start_line, start_col))
+                tok = Token(SINGLE_CHAR_TOKENS[ch], ch, start_line, start_col)
+                self._last_token_line = tok.line
+                tokens.append(tok)
                 continue
 
             raise ZenSyntaxError(f"Unexpected character {ch!r}", start_line, start_col)
+
+
+def tokenize_with_comments(source: str) -> tuple[list[Token], list[tuple[int, str]]]:
+    """Lex source code and also return trailing `//` comments that followed code on the same line."""
+    lx = Lexer(source)
+    return lx.tokenize(), lx.trailing_comments
 
 
 def tokenize(source: str) -> list[Token]:

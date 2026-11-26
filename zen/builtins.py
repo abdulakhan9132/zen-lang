@@ -27,6 +27,17 @@ if TYPE_CHECKING:
     from zen.interpreter import Interpreter, ZenBuiltin
 
 _GLOBAL_RNG = random.Random()
+_RECORDED_SEED: list[Any] = []
+
+
+def get_recorded_seed() -> Any:
+    """Return the most recent seed passed to seed() / zn.seed(), or None."""
+    return _RECORDED_SEED[-1] if _RECORDED_SEED else None
+
+
+def reset_recorded_seed() -> None:
+    """Clear the recorded seed tracker (used before --record runs)."""
+    _RECORDED_SEED.clear()
 
 
 def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuiltin"]) -> None:
@@ -90,7 +101,15 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
             acc = interp._call_value(fn, [acc, item], 0, 0)
         return acc
 
+    def _floor_div(a: Any, b: Any) -> Any:
+        na = _check_num(a, "floor_div")
+        nb = _check_num(b, "floor_div")
+        if nb == 0:
+            raise ZenRuntimeError("Division by zero", code="E007")
+        return na // nb
+
     def _seed(val: Any) -> None:
+        _RECORDED_SEED.append(val)
         rng.seed(val)
 
     def _random() -> float:
@@ -454,6 +473,7 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
         "pow": lambda x, y: math.pow(_check_num(x, "pow"), _check_num(y, "pow")),
         "abs": lambda x: abs(_check_num(x, "abs")),
         "floor": lambda x: math.floor(_check_num(x, "floor")),
+        "floor_div": _floor_div,
         "ceil": lambda x: math.ceil(_check_num(x, "ceil")),
         "round": lambda x, n=0: round(_check_num(x, "round"), int(_check_num(n, "round"))) if n else round(_check_num(x, "round")),
         "min": _min,

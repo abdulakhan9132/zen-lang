@@ -105,11 +105,15 @@ class Parser:
         tok = self._peek()
         if tok.type == TokenType.IDENT:
             self._advance()
-            return tok.value
-        if tok.type == TokenType.NONE:
+            base = tok.value
+        elif tok.type == TokenType.NONE:
             self._advance()
-            return "none"
-        raise ZenSyntaxError("Expected type name", tok.line, tok.column)
+            base = "none"
+        else:
+            raise ZenSyntaxError("Expected type name", tok.line, tok.column)
+        if self._match(TokenType.QUESTION):
+            return base + "?"
+        return base
 
     def _parse_let(self) -> ast.LetStmt:
         kw = self._advance()
@@ -324,7 +328,7 @@ class Parser:
 
     def _parse_factor(self) -> ast.Node:
         expr = self._parse_unary()
-        while op := self._match(TokenType.STAR, TokenType.SLASH, TokenType.PERCENT, TokenType.AT):
+        while op := self._match(TokenType.STAR, TokenType.SLASH, TokenType.DIV, TokenType.PERCENT, TokenType.AT):
             right = self._parse_unary()
             expr = ast.BinaryExpr(op.line, op.column, expr, op.value, right)
         return expr
@@ -373,11 +377,89 @@ class Parser:
                 break
         return expr
 
+    def _parse_fstring(self, tok: Token) -> ast.FStringExpr:
+        raw: str = tok.value
+        parts: list[str | ast.Node] = []
+        lit: list[str] = []
+        i = 0
+        n = len(raw)
+        while i < n:
+            ch = raw[i]
+            if ch == "{":
+                if i + 1 < n and raw[i + 1] == "{":
+                    lit.append("{")
+                    i += 2
+                    continue
+                if lit:
+                    parts.append("".join(lit))
+                    lit.clear()
+                i += 1
+                depth = 1
+                in_str = False
+                expr_chars: list[str] = []
+                while i < n and depth > 0:
+                    c = raw[i]
+                    if in_str:
+                        expr_chars.append(c)
+                        if c == "\\" and i + 1 < n:
+                            i += 1
+                            expr_chars.append(raw[i])
+                        elif c == '"':
+                            in_str = False
+                    else:
+                        if c == '"':
+                            in_str = True
+                            expr_chars.append(c)
+                        elif c == "{":
+                            depth += 1
+                            expr_chars.append(c)
+                        elif c == "}":
+                            depth -= 1
+                            if depth > 0:
+                                expr_chars.append(c)
+                        else:
+                            expr_chars.append(c)
+                    i += 1
+                if depth != 0:
+                    raise ZenSyntaxError("Unclosed '{' in f-string", tok.line, tok.column)
+                expr_src = "".join(expr_chars).strip()
+                if not expr_src:
+                    raise ZenSyntaxError("Empty expression '{}' in f-string", tok.line, tok.column)
+                sub_tokens = [
+                    Token(t.type, t.value, tok.line, tok.column + t.column)
+                    for t in tokenize(expr_src)
+                ]
+                sub_parser = Parser(sub_tokens)
+                expr_node = sub_parser._parse_expression()
+                if not sub_parser._is_at_end():
+                    bad = sub_parser._peek()
+                    raise ZenSyntaxError(
+                        f"Unexpected token {bad.value!r} in f-string expression",
+                        tok.line,
+                        bad.column,
+                    )
+                parts.append(expr_node)
+            elif ch == "}":
+                if i + 1 < n and raw[i + 1] == "}":
+                    lit.append("}")
+                    i += 2
+                else:
+                    raise ZenSyntaxError("Single '}' is not allowed in f-string", tok.line, tok.column)
+            else:
+                lit.append(ch)
+                i += 1
+        if lit:
+            parts.append("".join(lit))
+        return ast.FStringExpr(tok.line, tok.column, parts)
+
     def _parse_primary(self) -> ast.Node:
         tok = self._peek()
         if tok.type in (TokenType.NUMBER, TokenType.STRING, TokenType.TRUE, TokenType.FALSE, TokenType.NONE):
             self._advance()
             return ast.Literal(tok.line, tok.column, tok.value)
+        if tok.type == TokenType.FSTRING:
+            self._advance()
+            return self._parse_fstring(tok)
         if tok.type == TokenType.IDENT:
             self._advance()
             return ast.VarExpr(tok.line, tok.column, tok.value)

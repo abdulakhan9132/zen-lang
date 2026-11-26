@@ -27,6 +27,7 @@ KEYWORDS = frozenset({
     "none",
     "import",
     "as",
+    "div",
 })
 
 # Multi-character and single-character operators, grouped for maximal-munch lexing.
@@ -71,6 +72,7 @@ PLANNED_BUILTINS = {
         "map",
         "filter",
         "abs",
+        "floor_div",
         "sqrt",
         "exp",
         "log",

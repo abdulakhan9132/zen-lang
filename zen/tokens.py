@@ -9,6 +9,7 @@ class TokenType(Enum):
     # Literals & identifiers
     NUMBER = auto()
     STRING = auto()
+    FSTRING = auto()
     IDENT = auto()
 
     # Keywords
@@ -35,6 +36,7 @@ class TokenType(Enum):
     NONE = auto()
     IMPORT = auto()
     AS = auto()
+    DIV = auto()
 
     # Operators
     PLUS = auto()       # +
@@ -63,6 +65,7 @@ class TokenType(Enum):
     DOT = auto()        # .
     COLON = auto()      # :
     SEMICOLON = auto()  # ;
+    QUESTION = auto()   # ?
     ARROW = auto()      # ->
 
     EOF = auto()
@@ -92,6 +95,7 @@ KEYWORD_TOKENS: dict[str, TokenType] = {
     "none": TokenType.NONE,
     "import": TokenType.IMPORT,
     "as": TokenType.AS,
+    "div": TokenType.DIV,
 }
 
 TWO_CHAR_OPERATORS: dict[str, TokenType] = {
@@ -123,6 +127,7 @@ SINGLE_CHAR_TOKENS: dict[str, TokenType] = {
     ".": TokenType.DOT,
     ":": TokenType.COLON,
     ";": TokenType.SEMICOLON,
+    "?": TokenType.QUESTION,
 }
 
 

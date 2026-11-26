@@ -1,0 +1,35 @@
+import zennum as zn
+import zennet as nn
+
+// Integer division and floor_div
+assert (7 div 2) == 3
+assert floor_div(9, 4) == 2
+
+// f-strings
+let lang = "ZEN"
+let ver = 3
+assert f"{lang} v0.{ver}" == "ZEN v0.3"
+assert "literal {lang}" == "literal {lang}"
+
+// Optional types and flow narrowing
+fn safe_add(x: int?, bonus: any) -> int {
+    let res = 0
+    if x != none {
+        res = x + 10
+    }
+    if type(bonus) == "list" {
+        res = res + len(bonus)
+    }
+    return res
+}
+assert safe_add(5, [1, 2]) == 17
+assert safe_add(none, "ignored") == 0
+
+// Shared RNG across modules
+zn.seed(7)
+let a1 = zn.rand([2, 2]).tolist()
+seed(7)
+let a2 = zn.rand([2, 2]).tolist()
+assert a1 == a2
+
+say "Stage 1 trust self-tests passed"

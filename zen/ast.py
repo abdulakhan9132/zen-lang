@@ -123,6 +123,11 @@ class Literal(Node):
 
 
 @dataclass(frozen=True)
+class FStringExpr(Node):
+    parts: list[str | Node]
+
+
+@dataclass(frozen=True)
 class VarExpr(Node):
     name: str
 

@@ -357,6 +357,15 @@ class _FunctionCompiler:
             self._emit(Op.LOAD_CONST, node.value, node)
             return
 
+        if isinstance(node, ast.FStringExpr):
+            for part in node.parts:
+                if isinstance(part, str):
+                    self._emit(Op.LOAD_CONST, part, node)
+                else:
+                    self.compile_expr(part)
+            self._emit(Op.BUILD_FSTRING, len(node.parts), node)
+            return
+
         if isinstance(node, ast.VarExpr):
             info = self._resolve_var(node.name)
             if info.kind == "local":

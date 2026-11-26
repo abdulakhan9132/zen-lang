@@ -31,6 +31,7 @@ class Op(IntEnum):
     BUILD_LIST = auto()      # arg: count
     BUILD_MAP = auto()       # arg: count
     BUILD_TUPLE = auto()     # arg: count
+    BUILD_FSTRING = auto()   # arg: part count
     BUILD_SLICE = auto()
     GET_INDEX = auto()
     SET_INDEX = auto()

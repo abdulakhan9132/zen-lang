@@ -11,6 +11,7 @@ _BINARY_OPS = frozenset({
     TokenType.MINUS,
     TokenType.STAR,
     TokenType.SLASH,
+    TokenType.DIV,
     TokenType.PERCENT,
     TokenType.AT,
     TokenType.POW,
@@ -60,6 +61,7 @@ _KEYWORD_SPACE_AFTER = frozenset({
     TokenType.AND,
     TokenType.OR,
     TokenType.NOT,
+    TokenType.DIV,
 })
 
 
@@ -92,6 +94,15 @@ def _extract_comments(source: str) -> dict[int, tuple[str, bool]]:
 
 
 def _render_token(tok: Token) -> str:
+    if tok.type == TokenType.FSTRING:
+        escaped = (
+            tok.value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+            .replace("\r", "\\r")
+        )
+        return f'f"{escaped}"'
     if tok.type == TokenType.STRING:
         escaped = (
             tok.value.replace("\\", "\\\\")
@@ -193,7 +204,7 @@ def format_source(source: str) -> str:
             return False
         if prev_unary:
             return False
-        if cur.type in (TokenType.COMMA, TokenType.COLON, TokenType.RPAREN, TokenType.RBRACKET, TokenType.DOT, TokenType.SEMICOLON):
+        if cur.type in (TokenType.COMMA, TokenType.COLON, TokenType.RPAREN, TokenType.RBRACKET, TokenType.DOT, TokenType.SEMICOLON, TokenType.QUESTION):
             return False
         if prev.type == TokenType.COLON and container_stack and container_stack[-1][0] == "list":
             return False

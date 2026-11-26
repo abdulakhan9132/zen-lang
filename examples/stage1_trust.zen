@@ -1,0 +1,21 @@
+// Stage 1 Example: Trustworthy division, f-strings, optional narrowing, and reproducible RNG
+import zennum as zn
+
+let total = 7
+say f"7 div 2 = {total div 2}, floor_div = {floor_div(total, 2)}"
+
+fn describe(val: int?, extra: any) -> string {
+    if val != none {
+        if type(extra) == "list" {
+            return f"value={val}, items={len(extra)}"
+        }
+        return f"value={val}"
+    }
+    return "empty"
+}
+
+say describe(42, [10, 20, 30])
+say describe(none, none)
+
+zn.seed(42)
+say f"rand={zn.rand([2]).tolist()}"

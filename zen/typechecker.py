@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+import re
+import sys
+from typing import Any, TextIO
 
 from zen import ast
-from zen.errors import ZenError, ZenTypeError
+from zen.errors import ZenError, ZenTypeError, did_you_mean
+from zen.lexer import tokenize_with_comments
 from zen.parser import parse
 from zen.paths import resolve_import_path
+from zen.spec import KEYWORDS
 
 
 @dataclass
@@ -47,6 +51,14 @@ _PRIMITIVE_TYPES: dict[str, ZType] = {
     "tensor": TENSOR,
     "array": ARRAY,
 }
+
+
+@dataclass
+class OptionalType(ZType):
+    inner: ZType = field(default_factory=lambda: ANY)
+
+    def __str__(self) -> str:
+        return f"{self.inner}?"
 
 
 @dataclass
@@ -116,6 +128,12 @@ class _Scope:
             return self.parent.lookup(name)
         return None
 
+    def all_names(self) -> set[str]:
+        names = set(self.bindings.keys())
+        if self.parent is not None:
+            names.update(self.parent.all_names())
+        return names
+
 
 def _is_numeric(t: ZType) -> bool:
     return t == INT or t == FLOAT
@@ -124,6 +142,10 @@ def _is_numeric(t: ZType) -> bool:
 def _is_assignable(target: ZType, value: ZType) -> bool:
     if target is ANY or value is ANY:
         return True
+    if isinstance(target, OptionalType):
+        return value == NONE or _is_assignable(target.inner, value)
+    if isinstance(value, OptionalType):
+        return target is ANY
     if target == value:
         return True
     if target == FLOAT and value == INT:
@@ -164,6 +186,7 @@ def _builtin_bindings() -> dict[str, _Binding]:
         "pow": fn(2, 2, FLOAT),
         "abs": fn(1, 1, ANY),
         "floor": fn(1, 1, INT),
+        "floor_div": fn(2, 2, ANY),
         "ceil": fn(1, 1, INT),
         "round": fn(1, 2, FLOAT),
         "min": fn(1, None, ANY),
@@ -240,16 +263,36 @@ class TypeChecker:
         self._initial_builtins = _builtin_bindings()
         self.global_scope.bindings.update(self._initial_builtins)
         self._module_cache: dict[Path, ModuleType] = {}
+        self.warnings: list[str] = []
+        self._declared_vars: list[tuple[int, str]] = []
 
     def check_program(self, program: ast.Program, source: str | None = None) -> None:
         try:
             self._predeclare_decls(program.statements, self.global_scope)
             for stmt in program.statements:
                 self._check_stmt(stmt, self.global_scope, expected_ret=None, in_loop=False)
+            if source:
+                self._scan_comment_warnings(source)
         except ZenError as exc:
             if source:
                 raise exc.with_source(source) from exc
             raise
+
+    def _scan_comment_warnings(self, source: str) -> None:
+        _, trailing = tokenize_with_comments(source)
+        for line_no, comment in trailing:
+            if not comment:
+                continue
+            if re.fullmatch(r"\d+(?:\.\d+)?", comment):
+                self.warnings.append(
+                    f"Warning [line {line_no}]: '// {comment}' is a comment, not integer division; use 'div' or 'floor_div(...)'."
+                )
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", comment):
+                in_scope = any(ln <= line_no and nm == comment for ln, nm in self._declared_vars)
+                if in_scope:
+                    self.warnings.append(
+                        f"Warning [line {line_no}]: '// {comment}' is a comment referring to variable '{comment}', not division; use 'div' or 'floor_div(...)'."
+                    )
 
     def _predeclare_decls(self, stmts: list[ast.Node], scope: _Scope) -> None:
         for stmt in stmts:
@@ -265,12 +308,19 @@ class TypeChecker:
     def _resolve_type_name(self, name: str | None, scope: _Scope, node: ast.Node) -> ZType:
         if name is None:
             return ANY
+        if name.endswith("?"):
+            inner_name = name[:-1]
+            inner_t = self._resolve_type_name(inner_name, scope, node)
+            return OptionalType(inner_t.name, inner=inner_t)
         if name in _PRIMITIVE_TYPES:
             return _PRIMITIVE_TYPES[name]
         binding = scope.lookup(name)
         if binding is not None and isinstance(binding.ztype, ClassType):
             return InstanceType(binding.ztype.name, binding.ztype)
-        raise ZenTypeError(f"Unknown type '{name}'", node.line, node.column)
+        class_names = [k for k in scope.all_names() if isinstance(scope.lookup(k).ztype, ClassType)]  # type: ignore[union-attr]
+        hint = did_you_mean(name, list(_PRIMITIVE_TYPES.keys()) + class_names)
+        suffix = f". Did you mean '{hint}'?" if hint else ""
+        raise ZenTypeError(f"Unknown type '{name}'{suffix}", node.line, node.column, code="E004")
 
     def _always_returns(self, block: ast.Block) -> bool:
         for stmt in block.statements:
@@ -308,6 +358,7 @@ class TypeChecker:
     ) -> None:
         if isinstance(node, (ast.LetStmt, ast.ConstStmt)):
             is_const = isinstance(node, ast.ConstStmt)
+            self._declared_vars.append((node.line, node.name))
             val_type = self._check_expr(node.value, scope)
             if node.type_ann is not None:
                 ann_type = self._resolve_type_name(node.type_ann, scope, node)
@@ -316,6 +367,7 @@ class TypeChecker:
                         f"Type mismatch in '{node.name}': cannot assign '{val_type}' to '{ann_type}'",
                         node.line,
                         node.column,
+                        code="E004",
                     )
                 scope.define(node.name, ann_type, is_const=is_const)
             else:
@@ -329,25 +381,27 @@ class TypeChecker:
             if isinstance(target, ast.VarExpr):
                 binding = scope.lookup(target.name)
                 if binding is None:
+                    hint = did_you_mean(target.name, scope.all_names())
+                    suffix = f". Did you mean '{hint}'?" if hint else ""
                     raise ZenTypeError(
-                        f"Cannot assign to undefined variable '{target.name}'",
+                        f"Cannot assign to undefined variable '{target.name}'{suffix}",
                         target.line,
                         target.column,
+                        code="E002",
                     )
                 if binding.is_const:
                     raise ZenTypeError(
                         f"Cannot reassign constant '{target.name}'",
                         target.line,
                         target.column,
+                        code="E005",
                     )
                 if not _is_assignable(binding.ztype, val_type):
-                    # Allow widening dynamic/inferred variables without explicit annotation?
-                    # If target had a concrete type, catch mismatch unless joined via control flow;
-                    # here we flag incompatible concrete types (e.g. int -> string).
                     raise ZenTypeError(
                         f"Type mismatch in assignment to '{target.name}': expected '{binding.ztype}', got '{val_type}'",
                         target.line,
                         target.column,
+                        code="E004",
                     )
                 return
             if isinstance(target, ast.IndexExpr):
@@ -412,11 +466,21 @@ class TypeChecker:
             return
 
         if isinstance(node, ast.IfStmt):
-            for cond, block in node.branches:
-                self._check_expr(cond, scope)
-                self._check_block(block, scope, expected_ret, in_loop, collected_returns=collected_returns)
-            if node.else_block is not None:
-                self._check_block(node.else_block, scope, expected_ret, in_loop, collected_returns=collected_returns)
+            restores: list[tuple[_Binding, ZType]] = []
+            try:
+                for cond, block in node.branches:
+                    self._check_expr(cond, scope)
+                    then_n, else_n = self._extract_narrowings(cond, scope)
+                    saved_then = self._apply_narrowings(then_n, scope)
+                    try:
+                        self._check_block(block, scope, expected_ret, in_loop, collected_returns=collected_returns)
+                    finally:
+                        self._restore_narrowings(saved_then)
+                    restores.extend(self._apply_narrowings(else_n, scope))
+                if node.else_block is not None:
+                    self._check_block(node.else_block, scope, expected_ret, in_loop, collected_returns=collected_returns)
+            finally:
+                self._restore_narrowings(restores)
             return
 
         if isinstance(node, ast.WhileStmt):
@@ -425,6 +489,7 @@ class TypeChecker:
             return
 
         if isinstance(node, ast.ForStmt):
+            self._declared_vars.append((node.line, node.var_name))
             iter_type = self._check_expr(node.iterable, scope)
             if iter_type not in (ANY, LIST, MAP, STRING, ARRAY):
                 raise ZenTypeError(
@@ -440,13 +505,14 @@ class TypeChecker:
 
         if isinstance(node, ast.ReturnStmt):
             if expected_ret is None:
-                raise ZenTypeError("'return' used outside of function", node.line, node.column)
+                raise ZenTypeError("'return' used outside of function", node.line, node.column, code="E011")
             ret_val_type = NONE if node.value is None else self._check_expr(node.value, scope)
             if expected_ret is not ANY and not _is_assignable(expected_ret, ret_val_type):
                 raise ZenTypeError(
                     f"Return type mismatch: expected '{expected_ret}', got '{ret_val_type}'",
                     node.line,
                     node.column,
+                    code="E004",
                 )
             if collected_returns is not None:
                 collected_returns.append(ret_val_type)
@@ -455,7 +521,7 @@ class TypeChecker:
         if isinstance(node, (ast.BreakStmt, ast.ContinueStmt)):
             if not in_loop:
                 kw = "break" if isinstance(node, ast.BreakStmt) else "continue"
-                raise ZenTypeError(f"'{kw}' used outside of loop", node.line, node.column)
+                raise ZenTypeError(f"'{kw}' used outside of loop", node.line, node.column, code="E011")
             return
 
         if isinstance(node, ast.ExprStmt):
@@ -463,6 +529,89 @@ class TypeChecker:
             return
 
         raise ZenTypeError(f"Unsupported statement: {type(node).__name__}", node.line, node.column)
+
+    def _extract_narrowings(self, cond: ast.Node, scope: _Scope) -> tuple[dict[str, ZType], dict[str, ZType]]:
+        then_n: dict[str, ZType] = {}
+        else_n: dict[str, ZType] = {}
+
+        def _non_none(t: ZType) -> ZType:
+            return t.inner if isinstance(t, OptionalType) else t
+
+        if isinstance(cond, ast.UnaryExpr) and cond.op == "not":
+            t_inner, e_inner = self._extract_narrowings(cond.operand, scope)
+            return e_inner, t_inner
+
+        if isinstance(cond, ast.BinaryExpr):
+            if cond.op == "and":
+                t1, _ = self._extract_narrowings(cond.left, scope)
+                t2, _ = self._extract_narrowings(cond.right, scope)
+                then_n.update(t1)
+                then_n.update(t2)
+                return then_n, else_n
+            if cond.op in ("!=", "=="):
+                var_name: str | None = None
+                is_none_cmp = False
+                if isinstance(cond.left, ast.VarExpr) and isinstance(cond.right, ast.Literal) and cond.right.value is None:
+                    var_name = cond.left.name
+                    is_none_cmp = True
+                elif isinstance(cond.right, ast.VarExpr) and isinstance(cond.left, ast.Literal) and cond.left.value is None:
+                    var_name = cond.right.name
+                    is_none_cmp = True
+                if is_none_cmp and var_name is not None:
+                    b = scope.lookup(var_name)
+                    if b is not None and isinstance(b.ztype, OptionalType):
+                        if cond.op == "!=":
+                            then_n[var_name] = _non_none(b.ztype)
+                            else_n[var_name] = NONE
+                        else:
+                            then_n[var_name] = NONE
+                            else_n[var_name] = _non_none(b.ztype)
+                        return then_n, else_n
+
+                # `type(x) == "list"` narrowing
+                type_var: str | None = None
+                type_lit: str | None = None
+                if (
+                    isinstance(cond.left, ast.CallExpr)
+                    and isinstance(cond.left.callee, ast.VarExpr)
+                    and cond.left.callee.name == "type"
+                    and len(cond.left.args) == 1
+                    and isinstance(cond.left.args[0], ast.VarExpr)
+                    and isinstance(cond.right, ast.Literal)
+                    and isinstance(cond.right.value, str)
+                ):
+                    type_var = cond.left.args[0].name
+                    type_lit = cond.right.value
+                elif (
+                    isinstance(cond.right, ast.CallExpr)
+                    and isinstance(cond.right.callee, ast.VarExpr)
+                    and cond.right.callee.name == "type"
+                    and len(cond.right.args) == 1
+                    and isinstance(cond.right.args[0], ast.VarExpr)
+                    and isinstance(cond.left, ast.Literal)
+                    and isinstance(cond.left.value, str)
+                ):
+                    type_var = cond.right.args[0].name
+                    type_lit = cond.left.value
+                if type_var is not None and type_lit in _PRIMITIVE_TYPES:
+                    if cond.op == "==":
+                        then_n[type_var] = _PRIMITIVE_TYPES[type_lit]
+                    else:
+                        else_n[type_var] = _PRIMITIVE_TYPES[type_lit]
+        return then_n, else_n
+
+    def _apply_narrowings(self, narrow: dict[str, ZType], scope: _Scope) -> list[tuple[_Binding, ZType]]:
+        saved: list[tuple[_Binding, ZType]] = []
+        for name, new_t in narrow.items():
+            b = scope.lookup(name)
+            if b is not None:
+                saved.append((b, b.ztype))
+                b.ztype = new_t
+        return saved
+
+    def _restore_narrowings(self, saved: list[tuple[_Binding, ZType]]) -> None:
+        for b, old_t in reversed(saved):
+            b.ztype = old_t
 
     def _collect_self_fields(self, block: ast.Block, klass: ClassType) -> None:
         for stmt in block.statements:
@@ -507,6 +656,7 @@ class TypeChecker:
         fn_scope = _Scope(parent_scope)
         assert fn_type.params is not None
         for i, p_name in enumerate(node.params):
+            self._declared_vars.append((node.line, p_name))
             if i == 0 and self_type is not None:
                 fn_scope.define(p_name, self_type)
             else:
@@ -556,7 +706,7 @@ class TypeChecker:
     def _check_import(self, node: ast.ImportStmt, scope: _Scope) -> None:
         target = resolve_import_path(node.path, self.base_dir)
         if target is None:
-            raise ZenTypeError(f"Imported file not found: '{node.path}'", node.line, node.column)
+            raise ZenTypeError(f"Imported file not found: '{node.path}'", node.line, node.column, code="E009")
 
         if target in self._module_cache:
             mod = self._module_cache[target]
@@ -593,13 +743,27 @@ class TypeChecker:
             if isinstance(v, float):
                 return FLOAT
             if isinstance(v, str):
+                for m in re.finditer(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", v):
+                    var_name = m.group(1)
+                    if scope.lookup(var_name) is not None:
+                        self.warnings.append(
+                            f"Warning [line {node.line}]: plain string contains '{{{var_name}}}' matching variable '{var_name}' in scope; did you mean f\"...\"?"
+                        )
                 return STRING
             return ANY
+
+        if isinstance(node, ast.FStringExpr):
+            for part in node.parts:
+                if not isinstance(part, str):
+                    self._check_expr(part, scope)
+            return STRING
 
         if isinstance(node, ast.VarExpr):
             binding = scope.lookup(node.name)
             if binding is None:
-                raise ZenTypeError(f"Undefined variable '{node.name}'", node.line, node.column)
+                hint = did_you_mean(node.name, list(scope.all_names()) + list(KEYWORDS))
+                suffix = f". Did you mean '{hint}'?" if hint else ""
+                raise ZenTypeError(f"Undefined variable '{node.name}'{suffix}", node.line, node.column, code="E002")
             return binding.ztype
 
         if isinstance(node, ast.ListExpr):
@@ -675,10 +839,13 @@ class TypeChecker:
                 return ANY
             if isinstance(obj_t, ModuleType):
                 if node.member not in obj_t.exports:
+                    hint = did_you_mean(node.member, obj_t.exports.keys())
+                    suffix = f". Did you mean '{hint}'?" if hint else ""
                     raise ZenTypeError(
-                        f"Module '{obj_t.name}' has no member '{node.member}'",
+                        f"Module '{obj_t.name}' has no member '{node.member}'{suffix}",
                         node.line,
                         node.column,
+                        code="E003",
                     )
                 return obj_t.exports[node.member].ztype
             if isinstance(obj_t, ClassType):
@@ -693,10 +860,13 @@ class TypeChecker:
                         None if m.max_args is None else m.max_args + extra,
                         is_method=False,
                     )
+                hint = did_you_mean(node.member, obj_t.methods.keys())
+                suffix = f". Did you mean '{hint}'?" if hint else ""
                 raise ZenTypeError(
-                    f"Class '{obj_t.name}' has no method '{node.member}'",
+                    f"Class '{obj_t.name}' has no method '{node.member}'{suffix}",
                     node.line,
                     node.column,
+                    code="E003",
                 )
             if isinstance(obj_t, InstanceType):
                 m = obj_t.klass.find_method(node.member)
@@ -705,10 +875,16 @@ class TypeChecker:
                 f = obj_t.klass.find_field(node.member)
                 if f is not None:
                     return f
+                hint = did_you_mean(
+                    node.member,
+                    list(obj_t.klass.methods.keys()) + list(obj_t.klass.fields.keys()),
+                )
+                suffix = f". Did you mean '{hint}'?" if hint else ""
                 raise ZenTypeError(
-                    f"'{obj_t.klass.name}' instance has no field or method '{node.member}'",
+                    f"'{obj_t.klass.name}' instance has no field or method '{node.member}'{suffix}",
                     node.line,
                     node.column,
+                    code="E003",
                 )
             if obj_t == ARRAY:
                 array_members: dict[str, ZType] = {
@@ -850,7 +1026,7 @@ class TypeChecker:
                 return TENSOR
             raise ZenTypeError(f"Unsupported '+' between '{lt}' and '{rt}'", node.line, node.column)
 
-        if op in ("-", "*", "/", "%", "**"):
+        if op in ("-", "*", "/", "div", "%", "**"):
             if (lt == ARRAY and (rt == ARRAY or _is_numeric(rt))) or (rt == ARRAY and _is_numeric(lt)):
                 return ARRAY
             if op in ("-", "*", "/") and (
@@ -861,11 +1037,14 @@ class TypeChecker:
             if _is_numeric(lt) and _is_numeric(rt):
                 if op == "/":
                     return FLOAT
+                if op == "div":
+                    return INT if (lt == INT and rt == INT) else FLOAT
                 return INT if (lt == INT and rt == INT) else FLOAT
             raise ZenTypeError(
                 f"Operator '{op}' not supported between '{lt}' and '{rt}'",
                 node.line,
                 node.column,
+                code="E004",
             )
 
         if op in ("<", "<=", ">", ">="):
@@ -893,17 +1072,33 @@ class TypeChecker:
         return ANY
 
 
-def type_check_program(program: ast.Program, base_dir: Path | None = None, source: str | None = None) -> None:
-    """Run static type & semantic checks on a parsed ZEN AST."""
-    TypeChecker(base_dir=base_dir).check_program(program, source=source)
+def type_check_program(
+    program: ast.Program,
+    base_dir: Path | None = None,
+    source: str | None = None,
+    *,
+    stderr: TextIO | None = None,
+) -> list[str]:
+    """Run static type & semantic checks on a parsed ZEN AST, returning any warnings."""
+    checker = TypeChecker(base_dir=base_dir)
+    checker.check_program(program, source=source)
+    out = stderr if stderr is not None else sys.stderr
+    for w in checker.warnings:
+        out.write(w + "\n")
+    return checker.warnings
 
 
-def type_check_source(source: str, file_path: Path | None = None) -> ast.Program:
+def type_check_source(
+    source: str,
+    file_path: Path | None = None,
+    *,
+    stderr: TextIO | None = None,
+) -> ast.Program:
     """Parse and type-check ZEN source text, returning the AST."""
     try:
         program = parse(source)
         base_dir = file_path.resolve().parent if file_path is not None else Path.cwd()
-        type_check_program(program, base_dir=base_dir, source=source)
+        type_check_program(program, base_dir=base_dir, source=source, stderr=stderr)
         return program
     except ZenError as exc:
         raise exc.with_source(source) from exc

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TextIO
 
 from zen import native_kernels
-from zen.errors import ZenError
+from zen.errors import ZenError, format_error_explanation
 from zen.formatter import format_file
 from zen.interpreter import Interpreter, zen_format
 from zen.paths import resolve_docs_paths, resolve_guide_pdf_path, resolve_stdlib_path
@@ -108,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="zen", description="ZEN programming language CLI")
     parser.add_argument("--version", action="version", version=f"zen {VERSION}")
+    parser.add_argument("--debug", action="store_true", help="Show raw Python tracebacks on internal errors")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run", help="Run a .zen source file")
@@ -121,6 +122,17 @@ def main(argv: list[str] | None = None) -> int:
         "--no-check",
         action="store_true",
         help="Skip static type checking before running",
+    )
+    run_parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=10000,
+        help="Maximum function call recursion depth (default: 10000)",
+    )
+    run_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show raw Python tracebacks on internal errors",
     )
 
     repl_parser = subparsers.add_parser("repl", help="Start interactive ZEN REPL")
@@ -145,11 +157,19 @@ def main(argv: list[str] | None = None) -> int:
 
     subparsers.add_parser("docs", help="Print paths to ZENNUM.md and ZENNET.md reference docs")
 
+    explain_parser = subparsers.add_parser("explain", help="Explain a ZEN error code (e.g. E001)")
+    explain_parser.add_argument("code", nargs="?", default=None, help="Error code to explain")
+
     subparsers.add_parser("doctor", help="Print ZEN environment and backend diagnostics")
 
     args = parser.parse_args(raw_argv)
+    debug_mode = bool(getattr(args, "debug", False))
     if args.command == "repl":
         return run_repl(tree_walk=args.tree_walk)
+
+    if args.command == "explain":
+        print(format_error_explanation(args.code))
+        return 0
 
     if args.command == "doctor":
         stdlib_path = resolve_stdlib_path()
@@ -201,6 +221,11 @@ def main(argv: list[str] | None = None) -> int:
         except ZenError as exc:
             print(f"ZEN Error: {exc}", file=sys.stderr)
             return 1
+        except Exception:
+            if debug_mode:
+                raise
+            print("internal error, please report", file=sys.stderr)
+            return 1
         if args.check and changed:
             print(f"Needs formatting: {file_path}", file=sys.stderr)
             return 1
@@ -216,6 +241,11 @@ def main(argv: list[str] | None = None) -> int:
             type_check_source(src, file_path=file_path)
         except ZenError as exc:
             print(f"ZEN Error: {exc}", file=sys.stderr)
+            return 1
+        except Exception:
+            if debug_mode:
+                raise
+            print("internal error, please report", file=sys.stderr)
             return 1
         print(f"OK: {file_path}")
         return 0
@@ -239,6 +269,11 @@ def main(argv: list[str] | None = None) -> int:
             except ZenError as exc:
                 print(f"FAIL {tf}: {exc}", file=sys.stderr)
                 failed += 1
+            except Exception:
+                if debug_mode:
+                    raise
+                print(f"FAIL {tf}: internal error, please report", file=sys.stderr)
+                failed += 1
         print(f"ZEN tests: {passed} passed, {failed} failed")
         return 0 if failed == 0 else 1
 
@@ -247,11 +282,19 @@ def main(argv: list[str] | None = None) -> int:
         if not file_path.is_file():
             print(f"Error: file not found: {file_path}", file=sys.stderr)
             return 1
-        engine: VM | Interpreter = Interpreter() if args.tree_walk else VM()
+        engine: VM | Interpreter = (
+            Interpreter(max_depth=args.max_depth) if args.tree_walk else VM(max_depth=args.max_depth)
+        )
         try:
             engine.run_file(file_path, type_check=not args.no_check)
         except ZenError as exc:
             print(f"ZEN Error: {exc}", file=sys.stderr)
+            return 1
+        except Exception:
+            if debug_mode:
+                raise
+            line_info = f" at ZEN line {engine.current_line}" if getattr(engine, "current_line", 0) else ""
+            print(f"internal error, please report{line_info}", file=sys.stderr)
             return 1
         return 0
     return 1

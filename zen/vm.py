@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,7 @@ from zen.builtins import register_phase4_builtins
 from zen.bytecode import CodeObject, Op
 from zen.compiler import compile_program
 from zen.environment import Environment
-from zen.errors import ZenError, ZenRuntimeError
+from zen.errors import ZenError, ZenRuntimeError, did_you_mean
 from zen.interpreter import (
     ZenBuiltin,
     ZenClass,
@@ -24,6 +25,7 @@ from zen.interpreter import (
     zen_format,
     zen_type,
 )
+from zen.lexer import tokenize_with_comments
 from zen.parser import parse
 from zen.paths import resolve_import_path
 from zen.tensor import ZenTensor
@@ -126,11 +128,36 @@ class _VMInstance(ZenInstance):
         method = self.klass.find_method(name)
         if method is not None:
             return VMBoundMethod(self, method)  # type: ignore[arg-type]
+        hint = did_you_mean(name, list(self.fields.keys()) + list(self.klass.methods.keys()))
+        suffix = f". Did you mean '{hint}'?" if hint else ""
         raise ZenRuntimeError(
-            f"'{self.klass.name}' instance has no field or method '{name}'",
+            f"'{self.klass.name}' instance has no field or method '{name}'{suffix}",
             line,
             col,
+            code="E003",
         )
+
+
+class _VMFrame:
+    __slots__ = ("code", "upvalues", "locals_arr", "globals_env", "stack", "ip")
+
+    def __init__(
+        self,
+        code: CodeObject,
+        upvalues: tuple[_Cell, ...],
+        args: list[Any],
+        globals_env: Environment,
+    ) -> None:
+        self.code = code
+        self.upvalues = upvalues
+        locals_arr: list[Any] = [None] * code.num_locals
+        cell_slots = code.cell_slots
+        for i, arg_val in enumerate(args):
+            locals_arr[i] = _Cell(arg_val, False) if cell_slots[i] else arg_val
+        self.locals_arr = locals_arr
+        self.globals_env = globals_env
+        self.stack: list[Any] = []
+        self.ip = 0
 
 
 def _vm_class_call(self: VMClass, vm: "VM", args: list[Any], line: int, col: int) -> ZenInstance:
@@ -176,6 +203,7 @@ _OP_STORE_UPVALUE = int(Op.STORE_UPVALUE)
 _OP_BUILD_LIST = int(Op.BUILD_LIST)
 _OP_BUILD_MAP = int(Op.BUILD_MAP)
 _OP_BUILD_TUPLE = int(Op.BUILD_TUPLE)
+_OP_BUILD_FSTRING = int(Op.BUILD_FSTRING)
 _OP_BUILD_SLICE = int(Op.BUILD_SLICE)
 _OP_GET_INDEX = int(Op.GET_INDEX)
 _OP_SET_INDEX = int(Op.SET_INDEX)
@@ -202,8 +230,19 @@ _NUM_TYPES = (int, float)
 class VM:
     """Bytecode Virtual Machine executing compiled ZEN CodeObjects."""
 
-    def __init__(self, stdout: io.TextIOBase | None = None, base_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        stdout: io.TextIOBase | None = None,
+        base_dir: Path | None = None,
+        *,
+        stderr: io.TextIOBase | None = None,
+        max_depth: int = 10000,
+    ) -> None:
         self.stdout = stdout if stdout is not None else sys.stdout
+        self.stderr = stderr if stderr is not None else sys.stderr
+        self.max_depth = max(1, int(max_depth))
+        self._frame_count = 0
+        self.current_line = 0
         self.base_dir = (base_dir or Path.cwd()).resolve()
         self.globals = Environment()
         self._module_cache: dict[Path, ZenModule] = {}
@@ -228,6 +267,20 @@ class VM:
             return obj.shape[0] if obj.shape else 1
         raise ZenRuntimeError(f"Object of type '{zen_type(obj)}' has no len()")
 
+    def _emit_comment_warnings(self, source: str) -> None:
+        _, trailing = tokenize_with_comments(source)
+        for line_no, comment in trailing:
+            if not comment:
+                continue
+            if re.fullmatch(r"\d+(?:\.\d+)?", comment):
+                self.stderr.write(
+                    f"Warning [line {line_no}]: '// {comment}' is a comment, not integer division; use 'div' or 'floor_div(...)'.\n"
+                )
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", comment) and comment in self.globals.values:
+                self.stderr.write(
+                    f"Warning [line {line_no}]: '// {comment}' is a comment referring to variable '{comment}', not division; use 'div' or 'floor_div(...)'.\n"
+                )
+
     def run(
         self,
         source: str,
@@ -242,7 +295,9 @@ class VM:
         try:
             program = parse(source)
             if type_check:
-                type_check_program(program, base_dir=self.base_dir, source=source)
+                type_check_program(program, base_dir=self.base_dir, source=source, stderr=self.stderr)
+            else:
+                self._emit_comment_warnings(source)
             last_is_expr = return_last_expr and len(program.statements) > 0 and isinstance(program.statements[-1], ast.ExprStmt)
             if last_is_expr:
                 expr_stmt = program.statements[-1]
@@ -286,269 +341,335 @@ class VM:
         args: list[Any],
         globals_env: Environment,
     ) -> Any:
-        ops = code.ops
-        cargs = code.args
-        lines = code.lines
-        cols = code.cols
-        n_instr = len(ops)
-        stack: list[Any] = []
-        push = stack.append
-        pop = stack.pop
-        locals_arr: list[Any] = [None] * code.num_locals
-        cell_slots = code.cell_slots
-        for i, arg_val in enumerate(args):
-            locals_arr[i] = _Cell(arg_val, False) if cell_slots[i] else arg_val
+        if self._frame_count + 1 > self.max_depth:
+            err_line = code.lines[0] if code.lines else self.current_line
+            raise ZenRuntimeError(
+                f"Maximum recursion depth ({self.max_depth}) exceeded in '{code.name}' at depth {self._frame_count + 1}",
+                err_line,
+                1,
+                code="E010",
+            )
+        base_depth = self._frame_count
+        frames: list[_VMFrame] = [_VMFrame(code, upvalues, args, globals_env)]
+        self._frame_count = base_depth + 1
+        try:
+            while frames:
+                frame = frames[-1]
+                f_code = frame.code
+                ops = f_code.ops
+                cargs = f_code.args
+                lines = f_code.lines
+                cols = f_code.cols
+                n_instr = len(ops)
+                stack = frame.stack
+                push = stack.append
+                pop = stack.pop
+                locals_arr = frame.locals_arr
+                f_upvalues = frame.upvalues
+                f_globals = frame.globals_env
+                g_vals = f_globals.values
+                ip = frame.ip
+                switched = False
 
-        g_vals = globals_env.values
-        ip = 0
+                while ip < n_instr:
+                    op = ops[ip]
+                    arg = cargs[ip]
+                    cur_ip = ip
+                    ip += 1
+                    self.current_line = lines[cur_ip]
 
-        while ip < n_instr:
-            op = ops[ip]
-            arg = cargs[ip]
-            cur_ip = ip
-            ip += 1
+                    if op == _OP_LOAD_CONST:
+                        push(arg)
+                    elif op == _OP_POP:
+                        pop()
+                    elif op == _OP_DUP:
+                        push(stack[-1])
+                    elif op == _OP_LOAD_LOCAL:
+                        push(locals_arr[arg])
+                    elif op == _OP_STORE_LOCAL:
+                        locals_arr[arg[0]] = pop()
+                    elif op == _OP_DEFINE_CELL:
+                        locals_arr[arg[0]] = _Cell(pop(), arg[1])
+                    elif op == _OP_LOAD_CELL:
+                        push(locals_arr[arg].value)
+                    elif op == _OP_STORE_CELL:
+                        cell = locals_arr[arg]
+                        if cell.is_const:
+                            raise ZenRuntimeError("Cannot reassign constant", lines[cur_ip], cols[cur_ip], code="E005")
+                        cell.value = pop()
+                    elif op == _OP_LOAD_UPVALUE:
+                        push(f_upvalues[arg].value)
+                    elif op == _OP_STORE_UPVALUE:
+                        cell = f_upvalues[arg]
+                        if cell.is_const:
+                            raise ZenRuntimeError("Cannot reassign constant", lines[cur_ip], cols[cur_ip], code="E005")
+                        cell.value = pop()
+                    elif op == _OP_DEFINE_GLOBAL:
+                        f_globals.define(arg[0], pop(), is_const=arg[1])
+                    elif op == _OP_LOAD_GLOBAL:
+                        binding = g_vals.get(arg)
+                        if binding is None:
+                            hint = did_you_mean(arg, g_vals.keys())
+                            suffix = f". Did you mean '{hint}'?" if hint else ""
+                            raise ZenRuntimeError(f"Undefined variable '{arg}'{suffix}", lines[cur_ip], cols[cur_ip], code="E002")
+                        push(binding.value)
+                    elif op == _OP_STORE_GLOBAL:
+                        f_globals.assign(arg, pop(), lines[cur_ip], cols[cur_ip])
+                    elif op == _OP_BUILD_LIST:
+                        if arg == 0:
+                            push([])
+                        else:
+                            items = stack[-arg:]
+                            del stack[-arg:]
+                            push(items)
+                    elif op == _OP_BUILD_MAP:
+                        m: dict[Any, Any] = {}
+                        if arg > 0:
+                            items = stack[-2 * arg :]
+                            del stack[-2 * arg :]
+                            for i in range(0, 2 * arg, 2):
+                                k = items[i]
+                                if isinstance(k, (list, dict)):
+                                    raise ZenRuntimeError("Map key cannot be a list or map", lines[cur_ip], cols[cur_ip])
+                                m[k] = items[i + 1]
+                        push(m)
+                    elif op == _OP_BUILD_TUPLE:
+                        if arg == 0:
+                            push(())
+                        else:
+                            items = tuple(stack[-arg:])
+                            del stack[-arg:]
+                            push(items)
+                    elif op == _OP_BUILD_FSTRING:
+                        if arg == 0:
+                            push("")
+                        else:
+                            parts = stack[-arg:]
+                            del stack[-arg:]
+                            push("".join(p if isinstance(p, str) else zen_format(p) for p in parts))
+                    elif op == _OP_BUILD_SLICE:
+                        step = pop()
+                        stop = pop()
+                        start = pop()
+                        push(slice(start, stop, step))
+                    elif op == _OP_GET_INDEX:
+                        idx = pop()
+                        container = pop()
+                        push(self._get_index(container, idx, lines[cur_ip], cols[cur_ip]))
+                    elif op == _OP_SET_INDEX:
+                        val = pop()
+                        idx = pop()
+                        container = pop()
+                        self._set_index(container, idx, val, lines[cur_ip], cols[cur_ip])
+                    elif op == _OP_GET_MEMBER:
+                        obj = pop()
+                        if isinstance(obj, (ZenInstance, ZenModule, ZenClass)):
+                            push(obj.get(arg, lines[cur_ip], cols[cur_ip]))
+                        elif isinstance(obj, ZenTensor):
+                            push(self._tensor_member(obj, arg, lines[cur_ip], cols[cur_ip]))
+                        elif isinstance(obj, ZenArray):
+                            push(self._array_member(obj, arg, lines[cur_ip], cols[cur_ip]))
+                        else:
+                            raise ZenRuntimeError(
+                                f"Cannot access member '{arg}' on '{zen_type(obj)}'",
+                                lines[cur_ip],
+                                cols[cur_ip],
+                                code="E003",
+                            )
+                    elif op == _OP_SET_MEMBER:
+                        val = pop()
+                        obj = pop()
+                        if isinstance(obj, ZenInstance):
+                            obj.fields[arg] = val
+                        else:
+                            raise ZenRuntimeError(
+                                f"Cannot set property '{arg}' on '{zen_type(obj)}'",
+                                lines[cur_ip],
+                                cols[cur_ip],
+                                code="E003",
+                            )
+                    elif op == _OP_UNARY_OP:
+                        val = pop()
+                        if arg == "not":
+                            push(not is_truthy(val))
+                        elif arg == "-":
+                            if isinstance(val, ZenInstance):
+                                neg_m = val.klass.find_method("__neg__")
+                                if neg_m is not None:
+                                    push(neg_m.call(self, [], lines[cur_ip], cols[cur_ip], bound_self=val))  # type: ignore[arg-type]
+                                    continue
+                            if isinstance(val, ZenTensor):
+                                push(val.mul(-1.0))
+                            elif isinstance(val, ZenArray):
+                                push(val.neg())
+                            elif _is_number(val):
+                                push(-val)
+                            else:
+                                raise ZenRuntimeError(f"Cannot negate '{zen_type(val)}'", lines[cur_ip], cols[cur_ip], code="E004")
+                    elif op == _OP_BINARY_OP:
+                        right = pop()
+                        left = pop()
+                        tl = type(left)
+                        tr = type(right)
+                        if (tl is int or tl is float) and (tr is int or tr is float):
+                            if arg == "+":
+                                push(left + right)
+                                continue
+                            if arg == "-":
+                                push(left - right)
+                                continue
+                            if arg == "*":
+                                push(left * right)
+                                continue
+                            if arg == "<":
+                                push(left < right)
+                                continue
+                            if arg == "<=":
+                                push(left <= right)
+                                continue
+                            if arg == ">":
+                                push(left > right)
+                                continue
+                            if arg == ">=":
+                                push(left >= right)
+                                continue
+                            if arg == "==":
+                                push(left == right)
+                                continue
+                            if arg == "!=":
+                                push(left != right)
+                                continue
+                        push(self._binary_op(left, arg, right, lines[cur_ip], cols[cur_ip]))
+                    elif op == _OP_JUMP:
+                        ip = arg
+                    elif op == _OP_JUMP_IF_FALSE:
+                        if not is_truthy(pop()):
+                            ip = arg
+                    elif op == _OP_JUMP_IF_FALSE_OR_POP:
+                        if not is_truthy(stack[-1]):
+                            ip = arg
+                        else:
+                            pop()
+                    elif op == _OP_JUMP_IF_TRUE_OR_POP:
+                        if is_truthy(stack[-1]):
+                            ip = arg
+                        else:
+                            pop()
+                    elif op == _OP_GET_ITER:
+                        iterable = pop()
+                        if isinstance(iterable, str):
+                            push(iter(list(iterable)))
+                        elif isinstance(iterable, (list, range)):
+                            push(iter(iterable))
+                        elif isinstance(iterable, ZenArray):
+                            push(iter(iterable.get_item(i) for i in range(iterable.shape[0])))
+                        elif isinstance(iterable, dict):
+                            push(iter(iterable.keys()))
+                        else:
+                            raise ZenRuntimeError(
+                                f"Cannot iterate over '{zen_type(iterable)}'",
+                                lines[cur_ip],
+                                cols[cur_ip],
+                                code="E004",
+                            )
+                    elif op == _OP_FOR_ITER:
+                        it = stack[-1]
+                        try:
+                            push(next(it))
+                        except StopIteration:
+                            pop()
+                            ip = arg
+                    elif op == _OP_MAKE_CLOSURE:
+                        nd = arg.num_defaults
+                        if nd:
+                            def_vals = tuple(stack[-nd:])
+                            del stack[-nd:]
+                        else:
+                            def_vals = ()
+                        ups = tuple(
+                            locals_arr[idx] if is_local else f_upvalues[idx]
+                            for is_local, idx in arg.upvalues
+                        )
+                        push(VMClosure(arg, ups, f_globals, def_vals))
+                    elif op == _OP_CALL:
+                        call_args = stack[-arg:] if arg else []
+                        if arg:
+                            del stack[-arg:]
+                        callee = pop()
+                        if type(callee) is VMClosure:
+                            c_code = callee.code
+                            total = len(c_code.params)
+                            min_total = total - c_code.num_defaults
+                            if arg < min_total or arg > total:
+                                exp = f"{min_total}" if min_total == total else f"{min_total} to {total}"
+                                raise ZenRuntimeError(
+                                    f"Function '{callee.name}' expected {exp} argument(s), got {arg}",
+                                    lines[cur_ip],
+                                    cols[cur_ip],
+                                    code="E006",
+                                )
+                            if arg < total:
+                                call_args = call_args + list(callee.defaults[arg - min_total :])
+                            new_depth = self._frame_count + 1
+                            if new_depth > self.max_depth:
+                                raise ZenRuntimeError(
+                                    f"Maximum recursion depth ({self.max_depth}) exceeded in '{callee.name}' at depth {new_depth}",
+                                    lines[cur_ip],
+                                    cols[cur_ip],
+                                    code="E010",
+                                )
+                            frame.ip = ip
+                            frames.append(_VMFrame(c_code, callee.upvalues, call_args, callee.globals_env))
+                            self._frame_count = new_depth
+                            switched = True
+                            break
+                        push(self._call_value(callee, call_args, lines[cur_ip], cols[cur_ip]))
+                    elif op == _OP_RETURN:
+                        ret_val = pop() if stack else None
+                        frames.pop()
+                        self._frame_count -= 1
+                        if not frames:
+                            return ret_val
+                        frames[-1].stack.append(ret_val)
+                        switched = True
+                        break
+                    elif op == _OP_BUILD_CLASS:
+                        cls_name, method_names, has_super = arg
+                        sup_cls: ZenClass | None = None
+                        if has_super:
+                            sup_val = pop()
+                            if not isinstance(sup_val, ZenClass):
+                                raise ZenRuntimeError("Superclass must be a class", lines[cur_ip], cols[cur_ip], code="E004")
+                            sup_cls = sup_val
+                        n_m = len(method_names)
+                        closures = stack[-n_m:] if n_m else []
+                        if n_m:
+                            del stack[-n_m:]
+                        push(VMClass(cls_name, dict(zip(method_names, closures)), sup_cls))
+                    elif op == _OP_IMPORT:
+                        path_str, alias = arg
+                        self._exec_import(path_str, alias, lines[cur_ip], cols[cur_ip])
+                    elif op == _OP_SAY:
+                        vals = stack[-arg:]
+                        del stack[-arg:]
+                        self.stdout.write(" ".join(zen_format(v) for v in vals) + "\n")
+                    elif op == _OP_ASSERT:
+                        msg_val = pop() if arg else None
+                        cond_val = pop()
+                        if not is_truthy(cond_val):
+                            if arg:
+                                raise ZenRuntimeError(f"Assertion failed: {zen_format(msg_val)}", lines[cur_ip], cols[cur_ip], code="E012")
+                            raise ZenRuntimeError("Assertion failed", lines[cur_ip], cols[cur_ip], code="E012")
 
-            if op == _OP_LOAD_CONST:
-                push(arg)
-            elif op == _OP_POP:
-                pop()
-            elif op == _OP_DUP:
-                push(stack[-1])
-            elif op == _OP_LOAD_LOCAL:
-                push(locals_arr[arg])
-            elif op == _OP_STORE_LOCAL:
-                locals_arr[arg[0]] = pop()
-            elif op == _OP_DEFINE_CELL:
-                locals_arr[arg[0]] = _Cell(pop(), arg[1])
-            elif op == _OP_LOAD_CELL:
-                push(locals_arr[arg].value)
-            elif op == _OP_STORE_CELL:
-                cell = locals_arr[arg]
-                if cell.is_const:
-                    raise ZenRuntimeError("Cannot reassign constant", lines[cur_ip], cols[cur_ip])
-                cell.value = pop()
-            elif op == _OP_LOAD_UPVALUE:
-                push(upvalues[arg].value)
-            elif op == _OP_STORE_UPVALUE:
-                cell = upvalues[arg]
-                if cell.is_const:
-                    raise ZenRuntimeError("Cannot reassign constant", lines[cur_ip], cols[cur_ip])
-                cell.value = pop()
-            elif op == _OP_DEFINE_GLOBAL:
-                globals_env.define(arg[0], pop(), is_const=arg[1])
-            elif op == _OP_LOAD_GLOBAL:
-                binding = g_vals.get(arg)
-                if binding is None:
-                    raise ZenRuntimeError(f"Undefined variable '{arg}'", lines[cur_ip], cols[cur_ip])
-                push(binding.value)
-            elif op == _OP_STORE_GLOBAL:
-                globals_env.assign(arg, pop(), lines[cur_ip], cols[cur_ip])
-            elif op == _OP_BUILD_LIST:
-                if arg == 0:
-                    push([])
-                else:
-                    items = stack[-arg:]
-                    del stack[-arg:]
-                    push(items)
-            elif op == _OP_BUILD_MAP:
-                m: dict[Any, Any] = {}
-                if arg > 0:
-                    items = stack[-2 * arg :]
-                    del stack[-2 * arg :]
-                    for i in range(0, 2 * arg, 2):
-                        k = items[i]
-                        if isinstance(k, (list, dict)):
-                            raise ZenRuntimeError("Map key cannot be a list or map", lines[cur_ip], cols[cur_ip])
-                        m[k] = items[i + 1]
-                push(m)
-            elif op == _OP_BUILD_TUPLE:
-                if arg == 0:
-                    push(())
-                else:
-                    items = tuple(stack[-arg:])
-                    del stack[-arg:]
-                    push(items)
-            elif op == _OP_BUILD_SLICE:
-                step = pop()
-                stop = pop()
-                start = pop()
-                push(slice(start, stop, step))
-            elif op == _OP_GET_INDEX:
-                idx = pop()
-                container = pop()
-                push(self._get_index(container, idx, lines[cur_ip], cols[cur_ip]))
-            elif op == _OP_SET_INDEX:
-                val = pop()
-                idx = pop()
-                container = pop()
-                self._set_index(container, idx, val, lines[cur_ip], cols[cur_ip])
-            elif op == _OP_GET_MEMBER:
-                obj = pop()
-                if isinstance(obj, (ZenInstance, ZenModule, ZenClass)):
-                    push(obj.get(arg, lines[cur_ip], cols[cur_ip]))
-                elif isinstance(obj, ZenTensor):
-                    push(self._tensor_member(obj, arg, lines[cur_ip], cols[cur_ip]))
-                elif isinstance(obj, ZenArray):
-                    push(self._array_member(obj, arg, lines[cur_ip], cols[cur_ip]))
-                else:
-                    raise ZenRuntimeError(
-                        f"Cannot access member '{arg}' on '{zen_type(obj)}'",
-                        lines[cur_ip],
-                        cols[cur_ip],
-                    )
-            elif op == _OP_SET_MEMBER:
-                val = pop()
-                obj = pop()
-                if isinstance(obj, ZenInstance):
-                    obj.fields[arg] = val
-                else:
-                    raise ZenRuntimeError(
-                        f"Cannot set property '{arg}' on '{zen_type(obj)}'",
-                        lines[cur_ip],
-                        cols[cur_ip],
-                    )
-            elif op == _OP_UNARY_OP:
-                val = pop()
-                if arg == "not":
-                    push(not is_truthy(val))
-                elif arg == "-":
-                    if isinstance(val, ZenInstance):
-                        neg_m = val.klass.find_method("__neg__")
-                        if neg_m is not None:
-                            push(neg_m.call(self, [], lines[cur_ip], cols[cur_ip], bound_self=val))  # type: ignore[arg-type]
-                            continue
-                    if isinstance(val, ZenTensor):
-                        push(val.mul(-1.0))
-                    elif isinstance(val, ZenArray):
-                        push(val.neg())
-                    elif _is_number(val):
-                        push(-val)
-                    else:
-                        raise ZenRuntimeError(f"Cannot negate '{zen_type(val)}'", lines[cur_ip], cols[cur_ip])
-            elif op == _OP_BINARY_OP:
-                right = pop()
-                left = pop()
-                tl = type(left)
-                tr = type(right)
-                if (tl is int or tl is float) and (tr is int or tr is float):
-                    if arg == "+":
-                        push(left + right)
-                        continue
-                    if arg == "-":
-                        push(left - right)
-                        continue
-                    if arg == "*":
-                        push(left * right)
-                        continue
-                    if arg == "<":
-                        push(left < right)
-                        continue
-                    if arg == "<=":
-                        push(left <= right)
-                        continue
-                    if arg == ">":
-                        push(left > right)
-                        continue
-                    if arg == ">=":
-                        push(left >= right)
-                        continue
-                    if arg == "==":
-                        push(left == right)
-                        continue
-                    if arg == "!=":
-                        push(left != right)
-                        continue
-                push(self._binary_op(left, arg, right, lines[cur_ip], cols[cur_ip]))
-            elif op == _OP_JUMP:
-                ip = arg
-            elif op == _OP_JUMP_IF_FALSE:
-                if not is_truthy(pop()):
-                    ip = arg
-            elif op == _OP_JUMP_IF_FALSE_OR_POP:
-                if not is_truthy(stack[-1]):
-                    ip = arg
-                else:
-                    pop()
-            elif op == _OP_JUMP_IF_TRUE_OR_POP:
-                if is_truthy(stack[-1]):
-                    ip = arg
-                else:
-                    pop()
-            elif op == _OP_GET_ITER:
-                iterable = pop()
-                if isinstance(iterable, str):
-                    push(iter(list(iterable)))
-                elif isinstance(iterable, (list, range)):
-                    push(iter(iterable))
-                elif isinstance(iterable, ZenArray):
-                    push(iter(iterable.get_item(i) for i in range(iterable.shape[0])))
-                elif isinstance(iterable, dict):
-                    push(iter(iterable.keys()))
-                else:
-                    raise ZenRuntimeError(
-                        f"Cannot iterate over '{zen_type(iterable)}'",
-                        lines[cur_ip],
-                        cols[cur_ip],
-                    )
-            elif op == _OP_FOR_ITER:
-                it = stack[-1]
-                try:
-                    push(next(it))
-                except StopIteration:
-                    pop()
-                    ip = arg
-            elif op == _OP_MAKE_CLOSURE:
-                nd = arg.num_defaults
-                if nd:
-                    def_vals = tuple(stack[-nd:])
-                    del stack[-nd:]
-                else:
-                    def_vals = ()
-                ups = tuple(
-                    locals_arr[idx] if is_local else upvalues[idx]
-                    for is_local, idx in arg.upvalues
-                )
-                push(VMClosure(arg, ups, globals_env, def_vals))
-            elif op == _OP_CALL:
-                call_args = stack[-arg:] if arg else []
-                if arg:
-                    del stack[-arg:]
-                callee = pop()
-                if type(callee) is VMClosure and arg == len(callee.code.params) and callee.code.num_defaults == 0:
-                    push(self._execute_code(callee.code, callee.upvalues, call_args, callee.globals_env))
-                else:
-                    push(self._call_value(callee, call_args, lines[cur_ip], cols[cur_ip]))
-            elif op == _OP_RETURN:
-                return pop() if stack else None
-            elif op == _OP_BUILD_CLASS:
-                cls_name, method_names, has_super = arg
-                sup_cls: ZenClass | None = None
-                if has_super:
-                    sup_val = pop()
-                    if not isinstance(sup_val, ZenClass):
-                        raise ZenRuntimeError("Superclass must be a class", lines[cur_ip], cols[cur_ip])
-                    sup_cls = sup_val
-                n_m = len(method_names)
-                closures = stack[-n_m:] if n_m else []
-                if n_m:
-                    del stack[-n_m:]
-                push(VMClass(cls_name, dict(zip(method_names, closures)), sup_cls))
-            elif op == _OP_IMPORT:
-                path_str, alias = arg
-                self._exec_import(path_str, alias, lines[cur_ip], cols[cur_ip])
-            elif op == _OP_SAY:
-                vals = stack[-arg:]
-                del stack[-arg:]
-                self.stdout.write(" ".join(zen_format(v) for v in vals) + "\n")
-            elif op == _OP_ASSERT:
-                msg_val = pop() if arg else None
-                cond_val = pop()
-                if not is_truthy(cond_val):
-                    if arg:
-                        raise ZenRuntimeError(f"Assertion failed: {zen_format(msg_val)}", lines[cur_ip], cols[cur_ip])
-                    raise ZenRuntimeError("Assertion failed", lines[cur_ip], cols[cur_ip])
-
-        return None
+                if not switched:
+                    frames.pop()
+                    self._frame_count -= 1
+                    if not frames:
+                        return None
+                    frames[-1].stack.append(None)
+            return None
+        finally:
+            self._frame_count = base_depth
 
     def _exec_import(self, path_str: str, alias: str | None, line: int, col: int) -> None:
         target = resolve_import_path(path_str, self.base_dir)
@@ -558,7 +679,7 @@ class VM:
         if target in self._module_cache:
             module = self._module_cache[target]
         else:
-            mod_vm = VM(stdout=self.stdout, base_dir=target.parent)
+            mod_vm = VM(stdout=self.stdout, base_dir=target.parent, stderr=self.stderr, max_depth=self.max_depth)
             mod_vm._module_cache = self._module_cache
             for k, bval in self._builtin_values.items():
                 mod_vm.globals.define(k, bval)
@@ -764,12 +885,13 @@ class VM:
                 col,
             )
 
-        if op in ("-", "*", "/", "%", "**", "<", "<=", ">", ">="):
+        if op in ("-", "*", "/", "div", "%", "**", "<", "<=", ">", ">="):
             if not (_is_number(left) and _is_number(right)):
                 raise ZenRuntimeError(
                     f"Operator '{op}' requires numbers, got '{zen_type(left)}' and '{zen_type(right)}'",
                     line,
                     col,
+                    code="E004",
                 )
             if op == "-":
                 return left - right
@@ -777,11 +899,15 @@ class VM:
                 return left * right
             if op == "/":
                 if right == 0:
-                    raise ZenRuntimeError("Division by zero", line, col)
+                    raise ZenRuntimeError("Division by zero", line, col, code="E007")
                 return left / right
+            if op == "div":
+                if right == 0:
+                    raise ZenRuntimeError("Division by zero", line, col, code="E007")
+                return left // right
             if op == "%":
                 if right == 0:
-                    raise ZenRuntimeError("Modulo by zero", line, col)
+                    raise ZenRuntimeError("Modulo by zero", line, col, code="E007")
                 return left % right
             if op == "**":
                 return left ** right
