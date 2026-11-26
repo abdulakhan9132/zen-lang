@@ -121,6 +121,31 @@ fn _sort_strings(arr) {
     return arr
 }
 
+fn _check_encode_text(cls_name, text, stoi, strict) {
+    if len(text) == 0 {
+        if strict {
+            assert false, cls_name + ".encode: empty prompt (text cannot be empty)"
+        }
+        say "[" + cls_name + ".encode] Warning: empty prompt, returning []"
+        return
+    }
+    let unk = []
+    let seen_unk = {}
+    for ch in chars(text) {
+        if not contains(stoi, ch) and not contains(seen_unk, ch) {
+            seen_unk[ch] = true
+            push(unk, ch)
+        }
+    }
+    if len(unk) > 0 {
+        let msg = "unknown character(s) not in vocabulary: " + str(unk)
+        if strict {
+            assert false, cls_name + ".encode: " + msg
+        }
+        say "[" + cls_name + ".encode] Warning: skipping " + msg
+    }
+}
+
 class CharTokenizer {
     fn init(self, text = "") {
         self.stoi = {}
@@ -150,7 +175,8 @@ class CharTokenizer {
         self.vocab_size = len(self.itos)
     }
 
-    fn encode(self, text) {
+    fn encode(self, text, strict = false) {
+        _check_encode_text("CharTokenizer", text, self.stoi, strict)
         let out = []
         for ch in chars(text) {
             if contains(self.stoi, ch) {
@@ -258,7 +284,8 @@ class BPETokenizer {
         self.vocab_size = len(self.itos)
     }
 
-    fn encode(self, text) {
+    fn encode(self, text, strict = false) {
+        _check_encode_text("BPETokenizer", text, self.stoi, strict)
         let ids = []
         for ch in chars(text) {
             if contains(self.stoi, ch) {

@@ -18,16 +18,20 @@ from zen.zennum_core import (
     arr_outer,
     arr_split,
     arr_stack,
+    arr_tril,
+    arr_triu,
     arr_where,
 )
 
 if TYPE_CHECKING:
     from zen.interpreter import Interpreter, ZenBuiltin
 
+_GLOBAL_RNG = random.Random()
+
 
 def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuiltin"]) -> None:
     """Register Phase 4 built-in functions into the interpreter's global scope."""
-    rng = random.Random()
+    rng = _GLOBAL_RNG
 
     def _check_num(x: Any, fn_name: str) -> float | int:
         if isinstance(x, bool) or not isinstance(x, (int, float)):
@@ -323,6 +327,8 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
             "concat": _wrap("concat", lambda arrs, axis=0: arr_concat([ZenArray.from_list(x) for x in arrs], axis)),
             "stack": _wrap("stack", lambda arrs, axis=0: arr_stack([ZenArray.from_list(x) for x in arrs], axis)),
             "split": _wrap("split", lambda a, sec, axis=0: arr_split(ZenArray.from_list(a), sec, axis)),
+            "tril": _wrap("tril", lambda a, k=0: arr_tril(ZenArray.from_list(a), k)),
+            "triu": _wrap("triu", lambda a, k=0: arr_triu(ZenArray.from_list(a), k)),
             "where": _wrap("where", lambda c, x, y: arr_where(ZenArray.from_list(c, "bool"), x, y)),
             "clip": _wrap("clip", lambda a, lo, hi: ZenArray.from_list(a).clip(lo, hi)),
             "abs": _wrap("abs", lambda a: ZenArray.from_list(a).unary_math("abs")),

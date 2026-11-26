@@ -2,7 +2,14 @@ import zennum as zn
 import zennet as nn
 
 zn.seed(11)
-let gpt = nn.GPT({"vocab_size": 10, "n_layer": 1, "n_head": 2, "d_model": 8, "block_size": 6})
+let cfg = {
+    "vocab_size": 10,
+    "n_layer": 1,
+    "n_head": 2,
+    "d_model": 8,
+    "block_size": 6
+}
+let gpt = nn.GPT(cfg)
 let gen = nn.generate(gpt, [1, 2], 4, 0.0)
 say gen
 say len(gen)

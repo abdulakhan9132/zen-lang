@@ -319,7 +319,8 @@ class TypeChecker:
                     )
                 scope.define(node.name, ann_type, is_const=is_const)
             else:
-                scope.define(node.name, val_type, is_const=is_const)
+                inferred = ANY if (not is_const and val_type == NONE) else val_type
+                scope.define(node.name, inferred, is_const=is_const)
             return
 
         if isinstance(node, ast.AssignStmt):

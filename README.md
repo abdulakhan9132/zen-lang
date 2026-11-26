@@ -2,7 +2,7 @@
   <img src="docs/zen-logo.png" alt="ZEN Logo" width="128" />
 </p>
 
-# ZEN (v0.2.3)
+# ZEN (v0.2.4)
 
 **ZEN is the language. ZenNum handles numbers. ZenNet builds neural networks.**
 
@@ -107,6 +107,7 @@ Train a multi-head causal Transformer GPT from scratch using `nn.CharTokenizer`,
 | `zen fmt file.zen` | Format a `.zen` file in place (`--check` to verify) |
 | `zen test` | Run all `.zen` test files in `tests_zen/` |
 | `zen guide` | Open the `Learn-ZEN.pdf` beginner guide (`--path` prints its location) |
+| `zen docs` | Print the paths to the packaged `ZENNUM.md` and `ZENNET.md` references |
 | `zen doctor` | Print ZEN version, OS, Python version, math backend, stdlib path, and guide PDF path |
 
 ## Current Limitations

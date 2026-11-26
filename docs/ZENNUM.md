@@ -95,6 +95,10 @@ You can also import without an alias (`import zennum`).
   ```zen
   let parts = zn.split(zn.arange(6), 3)
   ```
+- `zn.tril(a, k = 0)` / `zn.triu(a, k = 0)` — Lower / upper triangular part of a 2D+ array (`k` shifts the diagonal; `k = 1` on `zn.triu` gives a causal mask).
+  ```zen
+  let mask = zn.triu(zn.ones([4, 4], "bool"), 1)
+  ```
 - `zn.where(cond, x, y)` — Pick elements from `x` where `cond` is true, else `y`.
   ```zen
   say zn.where(zn.array([true, false]), [1, 2], [10, 20])

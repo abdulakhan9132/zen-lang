@@ -94,7 +94,7 @@ class GuideDocTemplate(BaseDocTemplate):
         canvas.line(0.75 * inch, h - 0.6 * inch, w - 0.75 * inch, h - 0.6 * inch)
         canvas.setFont("Helvetica", 8.5)
         canvas.setFillColor(TEXT_MUTED)
-        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.2.3)")
+        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.2.4)")
         canvas.drawRightString(w - 0.75 * inch, 0.45 * inch, f"Page {doc.page}")
         canvas.restoreState()
 
@@ -110,7 +110,7 @@ def _code_box(title: str, text: str, bg=CODE_BG, border=PURPLE) -> Table:
     )
     pre = Preformatted(
         text,
-        ParagraphStyle("CodeMono", fontName="Courier", fontSize=8.7, leading=11.5, textColor=TEXT_DARK),
+        ParagraphStyle("CodeMono", fontName="Courier", fontSize=8.2, leading=11.0, textColor=TEXT_DARK),
     )
     tbl = Table([[label], [pre]], colWidths=[6.9 * inch])
     tbl.setStyle(
@@ -197,7 +197,7 @@ def build_pdf() -> int:
     story.append(Spacer(1, 0.55 * inch))
     story.append(
         Paragraph(
-            "Version 0.2.3<br/>By Abdullah Khan Suri",
+            "Version 0.2.4<br/>By Abdullah Khan Suri",
             ParagraphStyle("CoverMeta", fontName="Helvetica-Bold", fontSize=12, leading=18, textColor=PURPLE, alignment=TA_CENTER),
         )
     )
@@ -336,6 +336,9 @@ def build_pdf() -> int:
         "13. Modules and files: import, read_file, write_file",
         "`import` loads functions and classes from another `.zen` file, while `read_file` and `write_file` read and save text files.",
         "13_modules_files.zen",
+        [
+            "Built-in helpers: `file_exists(path)` returns true/false before reading, and `clock()` returns high-resolution seconds for timing.",
+        ],
     )
     add_chapter(
         "14. Tensors: create, add, and matrix multiply (@)",
@@ -343,18 +346,18 @@ def build_pdf() -> int:
         "14_tensors.zen",
     )
     add_chapter(
-        "15. Autograd: gradients in 10 lines",
-        "Autograd (`stdlib/ai/autograd.zen`) tracks how numbers are combined and calls `backward()` to compute exact slopes (gradients).",
+        "15. Autograd: gradients in 8 lines",
+        "ZenNet (`import zennet as nn`) tracks how numbers are combined and calls `backward()` to compute exact slopes (gradients).",
         "15_autograd.zen",
     )
     add_chapter(
         "16. Your first neural network (XOR, loss going down)",
-        "By combining linear layers, activations, and the Adam optimizer in `.zen`, a neural network learns the XOR pattern as loss drops.",
+        "By combining `nn.Sequential`, `nn.Linear`, activations, and `nn.Adam` in `.zen`, a neural network learns XOR as loss drops.",
         "16_xor_nn.zen",
     )
     add_chapter(
-        "17. Tiny GPT: train, save checkpoint, generate text",
-        "`AutoCharGPT` (written in `.zen`) learns character patterns from text, saves weights to disk, reloads them, and generates new text.",
+        "17. Tiny GPT: train, save weights, generate text",
+        "`nn.GPT` (written in `.zen`) learns character patterns from text, saves weights to disk, reloads them, and generates new text.",
         "17_tiny_gpt.zen",
     )
 
@@ -391,6 +394,8 @@ def build_pdf() -> int:
         ["zen fmt file.zen", "Format a .zen file cleanly (--check to verify only)"],
         ["zen test", "Run all .zen test files in tests_zen/"],
         ["zen guide", "Open this Learn-ZEN.pdf guide (--path prints its path)"],
+        ["zen docs", "Print paths to packaged ZENNUM.md and ZENNET.md references"],
+        ["zen doctor", "Print ZEN version, OS, Python, math backend, stdlib & PDF paths"],
         ["zen --version", "Print the installed ZEN version"],
     ]
     cmd_tbl = Table(cmd_rows, colWidths=[2.6 * inch, 4.3 * inch])
@@ -424,7 +429,7 @@ def build_pdf() -> int:
         ("Exercise 7 (Maps & Strings)", "Count how many times each word appears in `\"zen is fast and zen is fun\"`.", "ex07_word_map.zen"),
         ("Exercise 8 (Classes)", "Build a `Counter` class with `inc()` and `value()` methods.", "ex08_counter_class.zen"),
         ("Exercise 9 (Tensors)", "Multiply two 2x2 tensors with `@` and print their `mean`.", "ex09_tensor_matmul.zen"),
-        ("Exercise 10 (Autograd)", "Find `df/dx` at `x = 4` for `f(x) = (x - 1) ** 2` using `autograd.zen`.", "ex10_autograd_grad.zen"),
+        ("Exercise 10 (Autograd)", "Find `df/dx` at `x = 4` for `f(x) = (x - 1) ** 2` using `zennet`.", "ex10_autograd_grad.zen"),
     ]
 
     story.append(Paragraph("20. 10 Practice Exercises", title_style))
@@ -478,6 +483,22 @@ def build_pdf() -> int:
         "25_zn_broadcasting.zen",
     )
 
+    cell_hdr = ParagraphStyle("TblHdr", fontName="Helvetica-Bold", fontSize=8.2, leading=10.5, textColor=colors.white)
+    cell_key = ParagraphStyle("TblKey", fontName="Helvetica-Bold", fontSize=8.0, leading=10.2, textColor=TEXT_DARK)
+    cell_mono = ParagraphStyle("TblMono", fontName="Courier", fontSize=7.7, leading=10.0, textColor=TEXT_DARK)
+
+    def wrap_sheet(rows: list[list[str]]) -> list[list[Paragraph]]:
+        out: list[list[Paragraph]] = []
+        for r_idx, row in enumerate(rows):
+            if r_idx == 0:
+                out.append([Paragraph(escape(c), cell_hdr) for c in row])
+            else:
+                out.append([
+                    Paragraph(escape(row[0]), cell_key),
+                    *[Paragraph(escape(c), cell_mono) for c in row[1:]],
+                ])
+        return out
+
     # 1-Page ZenNum Cheat Sheet
     story.append(Paragraph("21.5 ZenNum 1-Page Cheat Sheet", title_style))
     story.append(Paragraph("All core ZenNum functions in one place (`import zennum as zn`).", one_liner_style))
@@ -486,22 +507,18 @@ def build_pdf() -> int:
         ["Import", "import zennum as zn   (or: import zennum)"],
         ["Create", "zn.array(data, dtype), zn.zeros(shape), zn.ones(shape), zn.full(shape, val), zn.arange(a, b, s), zn.linspace(a, b, n), zn.eye(n), zn.rand(shape), zn.randn(shape), zn.seed(s)"],
         ["Inspect", "a.shape, a.ndim, a.size, a.dtype, a.T, a.tolist(), a.copy(), a.astype(dtype)"],
-        ["Slice / Mask", "a[1:3, :], a[:, -1], a[a > 0], a[0, 0] = 9, zn.where(cond, x, y), zn.clip(a, lo, hi)"],
+        ["Slice / Mask", "a[1:3, :], a[:, -1], a[a > 0], a[0, 0] = 9, zn.where(cond, x, y), zn.clip(a, lo, hi), zn.tril(a, k), zn.triu(a, k)"],
         ["Shape", "zn.reshape(a, s), zn.transpose(a, axes), zn.flatten(a), zn.squeeze(a), zn.unsqueeze(a, ax), zn.concat(list, ax), zn.stack(list, ax), zn.split(a, n, ax)"],
         ["Math & Stats", "zn.abs, zn.sqrt, zn.exp, zn.log, zn.sin, zn.cos, zn.tanh, zn.pow, zn.sum, zn.mean, zn.std, zn.var, zn.min, zn.max, zn.argmax, zn.argmin, zn.sort, zn.cumsum"],
         ["Linear Algebra", "a @ b, zn.matmul(a, b), zn.dot(a, b), zn.outer(a, b), zn.norm(a)"],
     ]
-    zn_tbl = Table(zn_sheet, colWidths=[1.35 * inch, 5.55 * inch])
+    zn_tbl = Table(wrap_sheet(zn_sheet), colWidths=[1.35 * inch, 5.55 * inch])
     zn_tbl.setStyle(
         TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), PURPLE),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-            ("FONTNAME", (1, 1), (1, -1), "Courier"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PURPLE_SOFT]),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -551,6 +568,9 @@ def build_pdf() -> int:
         "22.2 Neural Network Layers & Losses",
         "Stack `Linear`, `ReLU`, `GELU`, `LayerNorm`, or `Dropout` inside `nn.Sequential`, then score predictions with `mse` or `cross_entropy`.",
         "27_nn_layers.zen",
+        [
+            "Custom modules: when subclassing `nn.Module`, always call `nn.Module.init(self)` inside `fn init(self, ...)` so `parameters()` finds your layers.",
+        ],
     )
     add_chapter(
         "22.3 Training XOR in 15 Lines",
@@ -561,6 +581,9 @@ def build_pdf() -> int:
         "22.4 Datasets, DataLoaders & Tokenizers",
         "Split data with `train_val_split`, shuffle mini-batches via `DataLoader`, and convert text to IDs using `CharTokenizer` or `BPETokenizer`.",
         "29_nn_data.zen",
+        [
+            "Prompt safety: `encode(text)` and `nn.generate(...)` warn and keep default fallbacks (`[]` / skipped unknown chars / token 0); pass `strict = true` to raise an error instead.",
+        ],
     )
     add_chapter(
         "22.5 Building & Training a Mini GPT",
@@ -599,25 +622,21 @@ def build_pdf() -> int:
     nn_sheet = [
         ["Category", "API"],
         ["Autograd", "nn.tensor(d, req_grad), t.backward(), t.grad, t.zero_grad(), t.detach(), t.item(), nn.no_grad(fn)"],
-        ["Ops & Act.", "+ - * / ** @, reshape, transpose, sum, mean, relu, gelu, sigmoid, tanh, softmax, log_softmax, masked_fill, gather, layernorm"],
-        ["Layers", "nn.Module, nn.Linear, nn.Embedding, nn.LayerNorm, nn.Dropout, nn.ReLU, nn.GELU, nn.Tanh, nn.Sigmoid, nn.Sequential, nn.MultiHeadAttention, nn.TransformerBlock, nn.GPT"],
+        ["Ops & Act.", "+ - * / ** @, reshape, transpose, concat, stack, tril, triu, sum, mean, relu, gelu, sigmoid, tanh, softmax, log_softmax, masked_fill, gather, layernorm"],
+        ["Layers", "nn.Module (call nn.Module.init(self)), nn.Linear, nn.Embedding, nn.LayerNorm, nn.Dropout, nn.ReLU, nn.GELU, nn.Tanh, nn.Sigmoid, nn.Sequential, nn.MultiHeadAttention, nn.TransformerBlock, nn.GPT"],
         ["Losses", "nn.mse(pred, y), nn.cross_entropy(logits, targets), nn.binary_cross_entropy(p, y)"],
         ["Optimizers", "nn.SGD(params, lr, momentum), nn.Adam(params, lr), nn.AdamW(params, lr, weight_decay), nn.clip_grad_norm(params, max)"],
         ["Schedulers", "nn.StepLR(opt, step, gamma), nn.CosineAnnealingLR(opt, total, min_lr), nn.WarmupLR(opt, steps)"],
         ["Data & Tok.", "nn.Dataset, nn.DataLoader, nn.train_val_split, nn.CharTokenizer, nn.BPETokenizer, nn.text_to_batches"],
-        ["Train & Eval", "nn.Trainer, nn.fit, nn.generate(model, prompt, n, temp, top_k), nn.accuracy, nn.perplexity, model.save / load"],
+        ["Train & Eval", "nn.Trainer, nn.fit, nn.generate(model, prompt, n, temp, top_k, strict), nn.accuracy, nn.perplexity, model.save / load"],
     ]
-    nn_tbl = Table(nn_sheet, colWidths=[1.25 * inch, 5.65 * inch])
+    nn_tbl = Table(wrap_sheet(nn_sheet), colWidths=[1.25 * inch, 5.65 * inch])
     nn_tbl.setStyle(
         TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), PURPLE),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-            ("FONTNAME", (1, 1), (1, -1), "Courier"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PURPLE_SOFT]),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -667,17 +686,13 @@ def build_pdf() -> int:
         ["One-line training", "custom loop or Lightning Trainer", "nn.fit(model, data, steps)"],
         ["Runtime / GPU", "C / CUDA", "Pure ZEN + C/Python CPU fallback (no GPU yet)"],
     ]
-    cmp_tbl = Table(cmp_rows, colWidths=[1.6 * inch, 2.55 * inch, 2.75 * inch])
+    cmp_tbl = Table(wrap_sheet(cmp_rows), colWidths=[1.5 * inch, 2.65 * inch, 2.75 * inch])
     cmp_tbl.setStyle(
         TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), PURPLE),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-            ("FONTNAME", (1, 1), (-1, -1), "Courier"),
-            ("FONTSIZE", (0, 0), (-1, -1), 7.8),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PURPLE_SOFT]),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (-1, -1), 5),
             ("RIGHTPADDING", (0, 0), (-1, -1), 5),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -689,9 +704,9 @@ def build_pdf() -> int:
 
     # Chapter 24: Current Limitations and Roadmap
     story.append(Paragraph("24. Current limitations and roadmap", title_style))
-    story.append(Paragraph("What ZEN v0.2.3 can do today, and what is still planned for future versions.", one_liner_style))
+    story.append(Paragraph("What ZEN v0.2.4 can do today, and what is still planned for future versions.", one_liner_style))
     limits = [
-        ("CPU-only execution:", "Pure-Python flat buffers run when no C compiler is present (~0.63s for 256x256 matmul; ~355 ms/step on a 2-layer d_model=16 GPT), with optional native C kernels (`zen/native/zen_kernels.c`). No GPU/CUDA yet."),
+        ("CPU-only execution:", "Pure-Python flat buffers run when no C compiler is present (~0.63s for 256x256 matmul; ~180–260 ms/step on a 1-layer d_model=16 GPT), with optional native C kernels (`zen/native/zen_kernels.c`). No GPU/CUDA yet."),
         ("Tiny GPT scale:", "Models and examples target low-RAM laptops using character/small-BPE corpora rather than large foundation models."),
         ("No native compiler yet:", "Programs run on the Python bytecode VM (`zen run`). LLVM/AOT compilation, external package manager, and LSP remain future work."),
     ]
@@ -699,7 +714,7 @@ def build_pdf() -> int:
         story.append(Paragraph(f"<b>{escape(head)}</b> {escape(body)}", note_style))
     story.append(Spacer(1, 8))
     story.append(Paragraph("Roadmap", subhead_style))
-    story.append(Paragraph("v0.2.2: Bytecode VM, static type checker, VS Code extension, ZenNum N-D arrays, ZenNet autograd/layers/GPT/optimizers/Trainer, cross-platform CLI (`zen doctor`), and Learn-ZEN guide.", note_style))
+    story.append(Paragraph("v0.2.2-v0.2.4: Bytecode VM, static type checker (`let x = none` widening), VS Code extension, ZenNum N-D arrays (`tril`/`triu`), ZenNet autograd (`concat`/`stack`/`tril`/`triu`), strict tokenizer/generate mode, process-wide shared RNG, `zen doctor`, `zen docs`, and Learn-ZEN guide.", note_style))
     story.append(Paragraph("Future: Prebuilt multi-platform native C wheels, GPU/SIMD backends, native compiler, and LSP.", note_style))
 
     PDF_OUT.parent.mkdir(parents=True, exist_ok=True)

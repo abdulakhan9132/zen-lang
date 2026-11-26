@@ -15,7 +15,7 @@ from zen import native_kernels
 from zen.errors import ZenError
 from zen.formatter import format_file
 from zen.interpreter import Interpreter, zen_format
-from zen.paths import resolve_guide_pdf_path, resolve_stdlib_path
+from zen.paths import resolve_docs_paths, resolve_guide_pdf_path, resolve_stdlib_path
 from zen.spec import VERSION
 from zen.typechecker import type_check_source
 from zen.vm import VM
@@ -143,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     guide_parser = subparsers.add_parser("guide", help="Open the Learn-ZEN.pdf beginner guide")
     guide_parser.add_argument("--path", action="store_true", help="Print the path to Learn-ZEN.pdf without opening it")
 
+    subparsers.add_parser("docs", help="Print paths to ZENNUM.md and ZENNET.md reference docs")
+
     subparsers.add_parser("doctor", help="Print ZEN environment and backend diagnostics")
 
     args = parser.parse_args(raw_argv)
@@ -159,6 +161,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Math backend: {backend_mode} [{native_kernels.NATIVE_BACKEND}]")
         print(f"Stdlib path: {stdlib_path if stdlib_path is not None else 'not found'}")
         print(f"Guide PDF path: {pdf_path if pdf_path is not None else 'not found'}")
+        return 0
+
+    if args.command == "docs":
+        doc_paths = resolve_docs_paths()
+        if not doc_paths:
+            print("Error: ZENNUM.md and ZENNET.md not found.", file=sys.stderr)
+            return 1
+        for name, p in doc_paths.items():
+            print(f"{name}: {p}")
         return 0
 
     if args.command == "guide":

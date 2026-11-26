@@ -2,7 +2,9 @@ import zennum as zn
 import zennet as nn
 
 zn.seed(5)
-let splits = nn.train_val_split([[1.0], [2.0], [3.0], [4.0]], [[2.0], [4.0], [6.0], [8.0]], 0.25, true, 5)
+let xs = [[1.0], [2.0], [3.0], [4.0]]
+let ys = [[2.0], [4.0], [6.0], [8.0]]
+let splits = nn.train_val_split(xs, ys, 0.25, true, 5)
 let loader = nn.DataLoader(splits[0], 2, false)
 say "Train batches: " + str(len(loader.batches()))
 

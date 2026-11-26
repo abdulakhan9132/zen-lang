@@ -18,7 +18,7 @@ Submodules can also be imported directly (`import zennet.autograd`, `import zenn
 - `nn.no_grad(fn() { ... })` — Run a function without tracking gradients.
 - `nn.is_grad_enabled()` / `nn.set_grad_enabled(bool)` — Inspect or toggle gradient tracking.
 - Supported differentiable operations (methods & `nn.*` functions + operators `+`, `-`, `*`, `/`, `**`, `@`, unary `-`, indexing/slicing `t[...]`):
-  `reshape`, `transpose`, `sum`, `mean`, `abs`, `sqrt`, `exp`, `log`, `sin`, `cos`, `clip`, `relu`, `gelu`, `sigmoid`, `tanh`, `softmax`, `log_softmax`, `dropout`, `masked_fill`, `gather`, `embedding`, `layernorm`.
+  `reshape`, `transpose`, `sum`, `mean`, `abs`, `sqrt`, `exp`, `log`, `sin`, `cos`, `clip`, `relu`, `gelu`, `sigmoid`, `tanh`, `softmax`, `log_softmax`, `dropout`, `masked_fill`, `gather`, `embedding`, `layernorm`, `tril`, `triu`, `nn.concat(tensors, axis = 0)`, `nn.stack(tensors, axis = 0)`.
 
 ```zen
 import zennet as nn
@@ -31,7 +31,7 @@ say x.grad   // [4.0, 6.0]
 ## Layers & Models
 
 - `nn.xavier(shape)` / `nn.normal(shape, mean = 0.0, std = 0.02)` — Parameter tensor initializers (`requires_grad = true`).
-- `class MyNet(nn.Module)` — Base class providing `parameters()`, `zero_grad()`, `train()`, `eval()`, `save(path)`, `load(path)`, and callable `model(x)`.
+- `class MyNet(nn.Module)` — Base class providing `parameters()`, `zero_grad()`, `train()`, `eval()`, `save(path)`, `load(path)`, and callable `model(x)`. When overriding `fn init(self, ...)`, always call `nn.Module.init(self)` first so `parameters()` and `train()`/`eval()` discover your submodules and tensors.
 - `nn.Linear(in_features, out_features, use_bias = true)` — Dense affine layer ($xW + b$).
 - `nn.Embedding(num_embeddings, embedding_dim)` — Token/index lookup embedding table.
 - `nn.LayerNorm(normalized_shape, eps = 1e-5)` — Layer normalization over the last dimension.
@@ -63,11 +63,11 @@ say x.grad   // [4.0, 6.0]
 - `nn.Dataset(x, y)` — Holds inputs and labels (`size()`, `get(i)`).
 - `nn.train_val_split(x, y, val_ratio = 0.2, shuffle = true, seed_val = none)` — Returns `[train_dataset, val_dataset]`.
 - `nn.DataLoader(dataset, batch_size = 32, shuffle = true, seed_val = none)` — Yields mini-batches via `.batches()`.
-- `nn.CharTokenizer(text = "")` — Character-level tokenizer (`fit`, `encode`, `decode`, `vocab_size`).
-- `nn.BPETokenizer(vocab_size = 64)` — Byte-pair encoding tokenizer trained directly from text (`fit`, `encode`, `decode`).
+- `nn.CharTokenizer(text = "")` — Character-level tokenizer (`fit`, `encode(text, strict = false)`, `decode`, `vocab_size`). By default (`strict = false`), an empty string warns and returns `[]` and unknown characters warn and are skipped; pass `strict = true` to raise an error on empty text or unknown characters.
+- `nn.BPETokenizer(vocab_size = 64)` — Byte-pair encoding tokenizer trained directly from text (`fit`, `encode(text, strict = false)`, `decode`). Same `strict` behavior as `CharTokenizer`.
 - `nn.text_to_batches(ids, block_size, batch_size)` — Sample next-token prediction `[X, Y]` batches.
 - `nn.Trainer(model, optimizer = none, loss_fn = none, lr = 0.01, clip_grad = 1.0, log_every = 10, checkpoint_path = none, save_every = 0)` — Training manager with logging, validation, checkpointing, and resume.
 - `nn.fit(model, train_data, steps = 100, ...)` — One-line training helper returning `{"loss_history", "final_loss", "val_loss"}`.
-- `nn.generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none)` — Autoregressive token sampling under `no_grad`.
+- `nn.generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none, strict = false)` — Autoregressive token sampling under `no_grad`. By default (`strict = false`), an empty prompt warns and falls back to token `0`; pass `strict = true` to raise an error on empty or out-of-range prompts.
 - `nn.accuracy(logits, targets)` — Classification accuracy fraction in `[0.0, 1.0]`.
 - `nn.perplexity(loss_val)` — Language-model perplexity $\exp(\text{loss})$.

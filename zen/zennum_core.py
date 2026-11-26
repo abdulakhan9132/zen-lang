@@ -816,3 +816,32 @@ def arr_outer(a: ZenArray, b: ZenArray) -> ZenArray:
     dt = _promote_dtype(af.dtype, bf.dtype)
     vals = [x * y for x in af.data for y in bf.data]
     return ZenArray(_make_buffer(vals, dt), (af.size, bf.size), dt)
+
+
+def _tri_mask(arr: ZenArray, k: int, *, upper: bool) -> ZenArray:
+    op_name = "triu" if upper else "tril"
+    if len(arr.shape) < 2:
+        raise ZenRuntimeError(f"{op_name} requires at least a 2D array, got shape {list(arr.shape)}")
+    if isinstance(k, bool) or not isinstance(k, int):
+        raise ZenRuntimeError(f"{op_name} diagonal offset 'k' must be an integer")
+    rows, cols = arr.shape[-2], arr.shape[-1]
+    batch = _numel(arr.shape[:-2])
+    mat_size = rows * cols
+    zero_val: Any = 0.0 if arr.dtype in ("float64", "float32") else (0 if arr.dtype == "int64" else False)
+    out = _zeros_buffer(len(arr.data), arr.dtype)
+    for b in range(batch):
+        base = b * mat_size
+        for r in range(rows):
+            row_off = base + r * cols
+            for c in range(cols):
+                keep = (c - r >= k) if upper else (c - r <= k)
+                out[row_off + c] = arr.data[row_off + c] if keep else zero_val
+    return ZenArray(out, arr.shape, arr.dtype)
+
+
+def arr_tril(arr: ZenArray, k: int = 0) -> ZenArray:
+    return _tri_mask(arr, k, upper=False)
+
+
+def arr_triu(arr: ZenArray, k: int = 0) -> ZenArray:
+    return _tri_mask(arr, k, upper=True)

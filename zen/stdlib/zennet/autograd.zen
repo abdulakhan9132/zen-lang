@@ -785,6 +785,30 @@ class Tensor {
         }
         return self._make_out(out_data, children, req, "layernorm", _back)
     }
+
+    fn tril(self, k = 0) {
+        let a = self
+        let out_data = zn.tril(a.data, k)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + zn.tril(out.grad, k)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "tril", _back)
+    }
+
+    fn triu(self, k = 0) {
+        let a = self
+        let out_data = zn.triu(a.data, k)
+        fn _back(out) {
+            if a.requires_grad {
+                a._ensure_grad()
+                a.grad = a.grad + zn.triu(out.grad, k)
+            }
+        }
+        return self._make_out(out_data, [a], a.requires_grad, "triu", _back)
+    }
 }
 
 // --- Functional helpers matching nn.* style ---
@@ -831,3 +855,93 @@ fn masked_fill(t, mask, value) { return _as_tensor(t).masked_fill(mask, value) }
 fn gather(t, indices) { return _as_tensor(t).gather(indices) }
 fn embedding(table, indices) { return _as_tensor(table).gather(indices) }
 fn layernorm(t, gamma = none, beta = none, eps = 1e-5) { return _as_tensor(t).layernorm(gamma, beta, eps) }
+fn tril(t, k = 0) { return _as_tensor(t).tril(k) }
+fn triu(t, k = 0) { return _as_tensor(t).triu(k) }
+
+fn concat(tensors, axis = 0) {
+    let ts = []
+    let arrs = []
+    let req = false
+    for item in tensors {
+        let t = _as_tensor(item)
+        push(ts, t)
+        push(arrs, t.data)
+        if t.requires_grad {
+            req = true
+        }
+    }
+    let out_data = zn.concat(arrs, axis)
+    let out = Tensor(out_data, _GRAD_ENABLED and req)
+    out._op = "concat"
+    if out.requires_grad {
+        out._prev = ts
+        let ax = _norm_axis(axis, out.ndim)
+        fn _back(o) {
+            let parts: any = none
+            if len(ts) == 1 {
+                parts = [o.grad]
+            } else {
+                let pts = []
+                let acc = 0
+                let i = 0
+                while i < len(ts) - 1 {
+                    acc = acc + ts[i].shape[ax]
+                    push(pts, acc)
+                    i = i + 1
+                }
+                parts = zn.split(o.grad, pts, ax)
+            }
+            let j = 0
+            while j < len(ts) {
+                let tj = ts[j]
+                if tj.requires_grad {
+                    tj._ensure_grad()
+                    tj.grad = tj.grad + parts[j]
+                }
+                j = j + 1
+            }
+        }
+        out._backward = _back
+    }
+    return out
+}
+
+fn stack(tensors, axis = 0) {
+    let ts = []
+    let arrs = []
+    let req = false
+    for item in tensors {
+        let t = _as_tensor(item)
+        push(ts, t)
+        push(arrs, t.data)
+        if t.requires_grad {
+            req = true
+        }
+    }
+    let out_data = zn.stack(arrs, axis)
+    let out = Tensor(out_data, _GRAD_ENABLED and req)
+    out._op = "stack"
+    if out.requires_grad {
+        out._prev = ts
+        let ax = _norm_axis(axis, out.ndim)
+        fn _back(o) {
+            let parts: any = none
+            if len(ts) == 1 {
+                parts = [o.grad]
+            } else {
+                parts = zn.split(o.grad, len(ts), ax)
+            }
+            let j = 0
+            while j < len(ts) {
+                let tj = ts[j]
+                if tj.requires_grad {
+                    tj._ensure_grad()
+                    tj.grad = tj.grad + zn.reshape(parts[j], tj.shape)
+                }
+                j = j + 1
+            }
+        }
+        out._backward = _back
+    }
+    return out
+}

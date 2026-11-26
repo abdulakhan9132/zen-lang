@@ -1,9 +1,9 @@
 // Exercise 10: Find df/dx at x = 4 for f(x) = (x - 1) ** 2.
-import "stdlib/ai/autograd.zen" as ag
+import zennet as nn
 
-let x = ag.value(4.0)
+let x = nn.tensor(4.0, true)
 let f = (x - 1.0) ** 2
 f.backward()
-say "f = " + str(f.data) + ", df/dx = " + str(x.grad)
-assert abs(f.data - 9.0) < 1e-9
-assert abs(x.grad - 6.0) < 1e-9
+say "f = " + str(f.item()) + ", df/dx = " + str(x.grad.tolist())
+assert abs(f.item() - 9.0) < 1e-9
+assert abs(x.grad.tolist() - 6.0) < 1e-9

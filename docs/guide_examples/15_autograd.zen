@@ -1,8 +1,8 @@
-import "stdlib/ai/autograd.zen" as ag
+import zennet as nn
 
-let x = ag.value(3.0)
+let x = nn.tensor(3.0, true)
 let y = x * x + 2.0 * x
 y.backward()
 
-say "y = " + str(y.data)
-say "dy/dx = " + str(x.grad)
+say "y = " + str(y.item())
+say "dy/dx = " + str(x.grad.tolist())

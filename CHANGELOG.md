@@ -2,6 +2,18 @@
 
 All notable changes to ZEN are documented in this file.
 
+## [0.2.4] - 2026-11-26
+
+### Added
+- **Differentiable `concat`, `stack`, `tril`, and `triu`:** Added `nn.concat(tensors, axis)`, `nn.stack(tensors, axis)`, `nn.tril(t, k)` / `t.tril(k)`, and `nn.triu(t, k)` / `t.triu(k)` with full reverse-mode gradients in `zennet.autograd`, plus `zn.tril(a, k)` and `zn.triu(a, k)` in `zennum` (`zen/zennum_core.py`).
+- **`strict` mode on tokenizers and `nn.generate()`:** Added optional `strict = false` to `CharTokenizer.encode`, `BPETokenizer.encode`, and `nn.generate`. Default (`strict = false`) preserves legacy behavior (empty prompt -> `[]` / token `0` fallback; unknown chars skipped) with clear warning messages; `strict = true` raises a descriptive `Assertion failed` runtime error.
+- **Packaged reference docs & `zen docs` CLI:** Bundled `ZENNUM.md` and `ZENNET.md` inside `zen/docs/` and added `zen docs` to print their installed paths.
+
+### Fixed
+- **Process-wide shared RNG (`seed` / `zn.seed`):** Replaced per-interpreter `random.Random()` instances in `zen/builtins.py` with a single process-wide `_GLOBAL_RNG`, so `seed()` and `zn.seed()` deterministically reset `zennet.data.text_to_batches`, `zennet.train.generate`, `zennum`, and both the VM and tree-walk interpreter across all imported modules.
+- **Type checker (`let x = none`):** Unannotated `let` bindings initialized to `none` now infer `any` (optional/unknown) in `zen/typechecker.py`, allowing subsequent reassignment (`let model = none; model = ...`) to pass `zen check`.
+- **Guide PDF (`docs/Learn-ZEN.pdf`):** Fixed right-edge text clipping on pages 33, 39, 40, 43, and 47 by wrapping table cells and long example lines; documented `zen doctor`, `zen docs`, `clock()`, `file_exists()`, and `nn.Module.init(self)`; updated Chapters 15–17 and Exercise 10 to use `zennum` and `zennet` instead of legacy `stdlib/ai/`.
+
 ## [0.2.3] - 2026-11-25
 
 ### Fixed

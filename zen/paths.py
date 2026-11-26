@@ -6,8 +6,10 @@ from pathlib import Path
 
 _PKG_STDLIB = Path(__file__).resolve().parent / "stdlib"
 _REPO_STDLIB = Path(__file__).resolve().parent.parent / "stdlib"
-_PKG_GUIDE = Path(__file__).resolve().parent / "docs" / "Learn-ZEN.pdf"
-_REPO_GUIDE = Path(__file__).resolve().parent.parent / "docs" / "Learn-ZEN.pdf"
+_PKG_DOCS = Path(__file__).resolve().parent / "docs"
+_REPO_DOCS = Path(__file__).resolve().parent.parent / "docs"
+_PKG_GUIDE = _PKG_DOCS / "Learn-ZEN.pdf"
+_REPO_GUIDE = _REPO_DOCS / "Learn-ZEN.pdf"
 
 
 def resolve_guide_pdf_path() -> Path | None:
@@ -16,6 +18,18 @@ def resolve_guide_pdf_path() -> Path | None:
         if candidate.is_file():
             return candidate.resolve()
     return None
+
+
+def resolve_docs_paths() -> dict[str, Path]:
+    """Return resolved paths for packaged reference docs (ZENNUM.md, ZENNET.md)."""
+    found: dict[str, Path] = {}
+    for name in ("ZENNUM.md", "ZENNET.md"):
+        for root in (_PKG_DOCS, _REPO_DOCS):
+            candidate = root / name
+            if candidate.is_file():
+                found[name] = candidate.resolve()
+                break
+    return found
 
 
 def resolve_stdlib_path() -> Path | None:

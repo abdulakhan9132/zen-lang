@@ -74,6 +74,14 @@ fn split(a, sections, axis = 0) {
     return _zennum_rt.split(a, sections, axis)
 }
 
+fn tril(a, k = 0) {
+    return _zennum_rt.tril(a, k)
+}
+
+fn triu(a, k = 0) {
+    return _zennum_rt.triu(a, k)
+}
+
 fn where(cond, x, y) {
     return _zennum_rt.where(cond, x, y)
 }

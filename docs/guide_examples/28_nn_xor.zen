@@ -5,7 +5,12 @@ zn.seed(42)
 let X = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
 let Y = [[0.0], [1.0], [1.0], [0.0]]
 
-let model = nn.Sequential([nn.Linear(2, 8), nn.Tanh(), nn.Linear(8, 1), nn.Sigmoid()])
+let model = nn.Sequential([
+    nn.Linear(2, 8),
+    nn.Tanh(),
+    nn.Linear(8, 1),
+    nn.Sigmoid()
+])
 let opt = nn.Adam(model.parameters(), 0.08)
 for step in range(150) {
     opt.zero_grad()
@@ -13,4 +18,5 @@ for step in range(150) {
     loss.backward()
     opt.step()
 }
-say "XOR predictions: " + str(map(model(X).data.flatten().tolist(), fn(v) { return round(v, 3) }))
+let preds = map(model(X).data.flatten().tolist(), fn(v) { return round(v, 3) })
+say "XOR predictions: " + str(preds)

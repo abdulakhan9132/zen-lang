@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zen-lang"
-version = "0.2.3"
+version = "0.2.4"
 description = "ZEN: A minimal programming language built from scratch for AI."
 readme = "README.md"
 license = "MIT"
@@ -49,6 +49,7 @@ zen = [
     "native/*.dylib",
     "native/*.pyd",
     "docs/Learn-ZEN.pdf",
+    "docs/*.md",
 ]
 
 [tool.pytest.ini_options]

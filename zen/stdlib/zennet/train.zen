@@ -46,7 +46,7 @@ fn perplexity(loss_val) {
     return exp(v)
 }
 
-fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none) {
+fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none, strict = false) {
     let was_training = model.training
     model.eval()
     let seq = prompt_ids
@@ -61,7 +61,18 @@ fn generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none) 
         push(out, int(tok))
     }
     if len(out) == 0 {
+        if strict {
+            assert false, "nn.generate: empty prompt_ids (provide at least 1 token ID)"
+        }
+        say "[nn.generate] Warning: empty prompt_ids, falling back to token 0"
         push(out, 0)
+    }
+    if strict and contains(fields(model), "vocab_size") {
+        for tid in out {
+            if tid < 0 or tid >= model.vocab_size {
+                assert false, "nn.generate: token ID " + str(tid) + " out of range [0, " + str(model.vocab_size - 1) + "]"
+            }
+        }
     }
 
     ag.no_grad(fn() {
