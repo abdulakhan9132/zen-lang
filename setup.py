@@ -11,10 +11,13 @@ from setuptools.command.build_ext import build_ext
 
 
 class OptionalBuildExt(build_ext):
-    """Build native math kernels when a C compiler exists; fall back silently otherwise."""
+    """Build native math kernels; fail loudly when ZEN_BUILD_NATIVE=1 is set."""
 
     def build_extensions(self) -> None:
         if os.environ.get("ZEN_SKIP_NATIVE_BUILD") == "1":
+            return
+        if os.environ.get("ZEN_BUILD_NATIVE") == "1":
+            super().build_extensions()
             return
         try:
             super().build_extensions()
@@ -22,6 +25,9 @@ class OptionalBuildExt(build_ext):
             return
 
     def build_extension(self, ext: Extension) -> None:
+        if os.environ.get("ZEN_BUILD_NATIVE") == "1":
+            super().build_extension(ext)
+            return
         try:
             super().build_extension(ext)
         except Exception:

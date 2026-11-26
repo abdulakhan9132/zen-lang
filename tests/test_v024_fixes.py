@@ -314,3 +314,41 @@ def test_zen_docs_cli_and_packaged_markdown(capsys: pytest.CaptureFixture[str]) 
 
     assert (REPO / "zen" / "docs" / "ZENNUM.md").is_file()
     assert (REPO / "zen" / "docs" / "ZENNET.md").is_file()
+
+
+# 6. Native C wheel build: PyInit__zen_kernels export & loud failure on ZEN_BUILD_NATIVE=1
+
+
+def test_native_kernel_exports_pyinit_and_setup_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    import runpy
+    from setuptools import Distribution
+    from setuptools.command.build_ext import build_ext
+
+    c_src = (REPO / "zen" / "native" / "zen_kernels.c").read_text(encoding="utf-8")
+    assert "PyInit__zen_kernels" in c_src
+    assert "ZEN_EXPORT void *PyInit__zen_kernels(void)" in c_src
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr("setuptools.setup", lambda **kw: captured.update(kw))
+    monkeypatch.setenv("ZEN_BUILD_NATIVE", "1")
+    monkeypatch.delenv("ZEN_SKIP_NATIVE_BUILD", raising=False)
+
+    ns = runpy.run_path(str(REPO / "setup.py"))
+    assert len(captured.get("ext_modules", [])) == 1
+    opt_cls = ns["OptionalBuildExt"]
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated compiler/linker failure")
+
+    monkeypatch.setattr(build_ext, "build_extensions", _boom)
+    monkeypatch.setattr(build_ext, "build_extension", _boom)
+
+    cmd = opt_cls(Distribution())
+    with pytest.raises(RuntimeError, match="simulated compiler/linker failure"):
+        cmd.build_extensions()
+    with pytest.raises(RuntimeError, match="simulated compiler/linker failure"):
+        cmd.build_extension(captured["ext_modules"][0])
+
+    monkeypatch.delenv("ZEN_BUILD_NATIVE", raising=False)
+    cmd.build_extensions()
+    cmd.build_extension(captured["ext_modules"][0])

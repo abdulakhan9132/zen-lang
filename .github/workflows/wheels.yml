@@ -19,10 +19,11 @@ jobs:
         uses: pypa/cibuildwheel@v2.21
         env:
           ZEN_BUILD_NATIVE: "1"
+          CIBW_ENVIRONMENT: "ZEN_BUILD_NATIVE=1"
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
           CIBW_SKIP: "*-musllinux_* *-win32"
           CIBW_TEST_REQUIRES: "pytest"
-          CIBW_TEST_COMMAND: "python -m zen --version && python -m zen run {package}/examples/mlp_xor.zen"
+          CIBW_TEST_COMMAND: "python -m zen --version && python -c \"import zen.native_kernels as nk; assert nk.NATIVE_AVAILABLE, nk.NATIVE_BACKEND; print(nk.NATIVE_BACKEND)\" && python -m zen run {package}/examples/mlp_xor.zen"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -49,9 +49,11 @@
   - Packaged `ZENNUM.md` / `ZENNET.md` inside `zen/docs/`, added `zen docs`, fixed PDF clipping on pages 33/39/40/43/47, and updated Chapters 15–17 to use `zennum`/`zennet`.
   - Tests: `107` fast pytest tests (`2` slow deselected) + `5` `.zen` self-tests passing.
 
-## Post-`v0.2.4` Cleanup (CI & Docs)
+## Post-`v0.2.4` Cleanup (CI, Docs & Native Wheel Fix)
 - **Status:** Complete (committed locally, not pushed)
-- **Notes:** Updated `.github/workflows/ci.yml` and `.github/workflows/wheels.yml` to `actions/checkout@v7` and `actions/setup-python@v7` (Node 24 native), added CI badge and `v0.2.4` Ubuntu `pipx` install instructions to `README.md`, and updated `PROGRESS.md`.
+- **Notes:**
+  - Updated `.github/workflows/ci.yml` and `.github/workflows/wheels.yml` to `actions/checkout@v7` and `actions/setup-python@v7` (Node 24 native), added CI badge and `v0.2.4` Ubuntu `pipx` install instructions to `README.md`, and updated `PROGRESS.md`.
+  - Fixed native wheel build: exported `PyInit__zen_kernels` stub in `zen/native/zen_kernels.c` for MSVC `/EXPORT:PyInit__zen_kernels` without Python headers, made `OptionalBuildExt` in `setup.py` fail loudly when `ZEN_BUILD_NATIVE=1`, added `CIBW_ENVIRONMENT: "ZEN_BUILD_NATIVE=1"` and `NATIVE_AVAILABLE` assertion in `.github/workflows/wheels.yml`, and added unit test coverage.
 
 ## Next Planned Items
 - Push local commits and `v0.2.4` tag to GitHub and publish the `v0.2.4` GitHub release with `dist/zen_lang-0.2.4-py3-none-any.whl` and `dist/zen_lang-0.2.4.tar.gz`.

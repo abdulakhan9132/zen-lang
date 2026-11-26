@@ -16,6 +16,11 @@
 
 #define ZEN_BLOCK 64
 
+/* ZEN loads the shared library via ctypes.CDLL; this stub satisfies Windows MSVC's
+ * /EXPORT:PyInit__zen_kernels linker requirement without needing Python headers.
+ */
+ZEN_EXPORT void *PyInit__zen_kernels(void) { return NULL; }
+
 ZEN_EXPORT void zen_matmul_f64(
     const double *A,
     const double *B,
