@@ -27,7 +27,7 @@ jobs:
       - name: Install ZEN and pytest
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pytest
+          python -m pip install -e . pytest setuptools
 
       - name: Check CLI diagnostics
         run: |

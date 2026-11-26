@@ -53,7 +53,8 @@
 - **Status:** Complete (committed locally, not pushed)
 - **Notes:**
   - Updated `.github/workflows/ci.yml` and `.github/workflows/wheels.yml` to `actions/checkout@v7` and `actions/setup-python@v7` (Node 24 native), added CI badge and `v0.2.4` Ubuntu `pipx` install instructions to `README.md`, and updated `PROGRESS.md`.
-  - Fixed native wheel build: exported `PyInit__zen_kernels` stub in `zen/native/zen_kernels.c` for MSVC `/EXPORT:PyInit__zen_kernels` without Python headers, made `OptionalBuildExt` in `setup.py` fail loudly when `ZEN_BUILD_NATIVE=1`, added `CIBW_ENVIRONMENT: "ZEN_BUILD_NATIVE=1"` and `NATIVE_AVAILABLE` assertion in `.github/workflows/wheels.yml`, and added unit test coverage.
+  - Fixed native wheel build: exported `PyInit__zen_kernels` stub in `zen/native/zen_kernels.c` for MSVC `/EXPORT:PyInit__zen_kernels` without Python headers, made `OptionalBuildExt` in `setup.py` fail loudly when `ZEN_BUILD_NATIVE=1`, added `CIBW_ENVIRONMENT: "ZEN_BUILD_NATIVE=1"`, skipped `*-manylinux_i686` alongside `*-musllinux_*` and `*-win32`, and added `NATIVE_AVAILABLE` assertion in `.github/workflows/wheels.yml`.
+  - Updated `.github/workflows/ci.yml` to install `setuptools` alongside `pytest` (for Python 3.12/3.13) and guarded `test_native_kernel_exports_pyinit_and_setup_fails_loudly` in `tests/test_v024_fixes.py` with `pytest.importorskip("setuptools")`.
 
 ## Next Planned Items
 - Push local commits and `v0.2.4` tag to GitHub and publish the `v0.2.4` GitHub release with `dist/zen_lang-0.2.4-py3-none-any.whl` and `dist/zen_lang-0.2.4.tar.gz`.

@@ -320,6 +320,7 @@ def test_zen_docs_cli_and_packaged_markdown(capsys: pytest.CaptureFixture[str]) 
 
 
 def test_native_kernel_exports_pyinit_and_setup_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("setuptools")
     import runpy
     from setuptools import Distribution
     from setuptools.command.build_ext import build_ext
