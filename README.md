@@ -2,7 +2,7 @@
   <img src="docs/zen-logo.png" alt="ZEN Logo" width="128" />
 </p>
 
-# ZEN (v0.2.4)
+# ZEN (v0.3.0)
 
 [![CI](https://github.com/abdulakhan9132/zen-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/abdulakhan9132/zen-lang/actions/workflows/ci.yml)
 
@@ -10,7 +10,7 @@
 
 A minimal, readable programming language built from scratch for learning coding and building real AI models (from linear regression to Transformer GPTs) in pure `.zen` code — with zero external AI libraries (`numpy`/`torch` never used).
 
-**[Beginner Guide: Learn ZEN (PDF)](docs/Learn-ZEN.pdf)** · **[ZenNum Reference](docs/ZENNUM.md)** · **[ZenNet Reference](docs/ZENNET.md)** · **[GPU Roadmap](docs/GPU_PLAN.md)** — or run `zen guide` after installing.
+**[Beginner Guide: Learn ZEN (PDF)](docs/Learn-ZEN.pdf)** · **[Language Reference](docs/LANGUAGE.md)** · **[ZenNum Reference](docs/ZENNUM.md)** · **[ZenNet Reference](docs/ZENNET.md)** · **[GPU Roadmap](docs/GPU_PLAN.md)** — or run `zen guide` after installing.
 
 ## Installation
 
@@ -23,7 +23,7 @@ Modern Ubuntu/Debian systems enforce PEP 668 (`error: externally-managed-environ
 1. `sudo apt install -y pipx`
 2. `pipx ensurepath`
 3. Open a new terminal (required so `~/.local/bin` from `pipx ensurepath` is on `PATH`).
-4. `pipx install https://github.com/abdulakhan9132/zen-lang/releases/download/v0.2.4/zen_lang-0.2.4-py3-none-any.whl`
+4. `pipx install https://github.com/abdulakhan9132/zen-lang/releases/download/v0.3.0/zen_lang-0.3.0-py3-none-any.whl`
 5. `zen doctor`
 
 If `zen` is not found, run `source ~/.bashrc` or open a new terminal.
@@ -104,19 +104,26 @@ Train a multi-head causal Transformer GPT from scratch using `nn.CharTokenizer`,
 | Command | Description |
 |---|---|
 | `zen` | Start the interactive REPL |
-| `zen run file.zen` | Type-check and execute a `.zen` file on the bytecode VM (`--no-check`, `--tree-walk`) |
+| `zen run file.zen` | Type-check and execute a `.zen` file (`--nan-trace`, `--record run.json`, `--max-depth N`, `--debug`, `--no-check`, `--tree-walk`) |
 | `zen check file.zen` | Run the static type checker without executing |
 | `zen fmt file.zen` | Format a `.zen` file in place (`--check` to verify) |
-| `zen test` | Run all `.zen` test files in `tests_zen/` |
+| `zen test` | Run all `.zen` test files in `tests_zen/` (`--doc` runs `//>` doctests) |
+| `zen replay run.json` | Replay a recorded run manifest and report `MATCH` / `MISMATCH` |
+| `zen explain [E001]` | Explain ZEN error codes (`E001`–`E014`) and suggested fixes |
 | `zen guide` | Open the `Learn-ZEN.pdf` beginner guide (`--path` prints its location) |
-| `zen docs` | Print the paths to the packaged `ZENNUM.md` and `ZENNET.md` references |
+| `zen docs` | Print the paths to packaged `LANGUAGE.md`, `ZENNUM.md`, and `ZENNET.md` references |
 | `zen doctor` | Print ZEN version, OS, Python version, math backend, stdlib path, and guide PDF path |
+
+## Standard Library
+
+Built-in `.zen` modules importable out of the box alongside `zennum` and `zennet`:
+`json`, `files`, `path`, `regex`, `datetime`, `env`, `csv`, `process`, `http`, `stats` (`statistics`). See [`docs/LANGUAGE.md`](docs/LANGUAGE.md).
 
 ## Current Limitations
 
-- **CPU-only execution (no GPU support yet):** ZEN runs on the CPU via pure-Python flat buffers (`~183 ms/step` on the 1-layer `d_model=16` GPT recipe), with optional portable C99/OpenMP acceleration (`zen/native/zen_kernels.c`) when compiled with `ZEN_BUILD_NATIVE=1`. See [docs/GPU_PLAN.md](docs/GPU_PLAN.md) for how GPU support could be added later.
+- **CPU-only execution (no GPU support yet):** ZEN runs on the CPU via pure-Python flat buffers, with optional portable C99/OpenMP acceleration (`zen/native/zen_kernels.c`) when compiled with `ZEN_BUILD_NATIVE=1`. See [docs/GPU_PLAN.md](docs/GPU_PLAN.md) for how GPU support could be added later.
 - **Small datasets & models:** Examples target low-RAM laptops (`examples/data/corpus.txt`) rather than GPU-scale training.
-- **Bytecode VM only:** No LLVM/native AOT compiler, external package registry, or LSP server yet.
+- **Bytecode VM only:** No native AOT compiler, external package registry, or LSP server yet — see [`docs/design/`](docs/design/) for v1.0 design memos (C backend, shape-checked tensors, units, index notation, `grad`/`train` blocks, safetensors).
 - **OS test coverage:** Tested locally on Windows; Linux (`ubuntu-latest`) and macOS (`macos-latest`) are configured in GitHub Actions CI (`.github/workflows/ci.yml`).
 
 ## License

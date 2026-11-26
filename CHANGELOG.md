@@ -2,6 +2,23 @@
 
 All notable changes to ZEN are documented in this file.
 
+## [0.3.0] - 2026-11-26
+
+### Added
+- **Trustworthy Core (Stage 1):**
+  - Explicit integer division operator `div` and `floor_div(a, b)` builtin, plus `zen check` warning on trailing `// <number|var_in_scope>` comments.
+  - String interpolation (`f"hello {name}"`) with `zen check` warning when `{var_in_scope}` appears in a plain string.
+  - Optional types (`T?`), `any` type, and flow narrowing (`x != none`, `x == none`, `type(x) == "..."`).
+  - Structured error codes `E001`–`E014`, `zen explain [code]`, Damerau/Levenshtein `did_you_mean` hints, `--debug` flag (suppressing raw Python tracebacks by default with `"internal error, please report"`), and `--max-depth N` (default `10000`) backed by an iterative `_VMFrame` heap stack.
+- **Everyday Language Ergonomics (Stage 2):**
+  - Exception handling (`try { ... } catch e { ... }` and `raise`), keyword arguments (`fn(a, b = 2)`), membership (`in` / `not in` for strings, lists, and maps), `if`-expressions, and list comprehensions (`[expr for x in seq if cond]`).
+  - String methods (`split`, `join`, `upper`, `lower`, `strip`, `replace`, `startswith`, `endswith`, `find`), string repetition (`"ab" * 3`), list methods (`append`, `pop`, `sort`, `reverse`, `index`), multiple returns & tuple destructuring (`return a, b`; `let x, y = f()`; `a, b = b, a`), and `input(prompt)`.
+- **Standard Library & Scientific Safety (Stage 3):**
+  - 10 packaged `.zen` standard library modules (`stdlib/*.zen` & `zen/stdlib/*.zen`): `json`, `files`, `path`, `regex`, `datetime`, `env`, `csv`, `process`, `http`, and `stats` (`statistics`).
+  - Scientific NaN/Inf tracing (`zen run --nan-trace`), reproducible run manifests (`zen run --record run.json` and `zen replay run.json`), and executable doctests (`zen test --doc` via `//>` / `//`).
+- **v1.0 Architecture Memos (Stage 4):** Added `docs/design/01_zen_to_c_backend.md` through `07_v1_language_freeze_checklist.md`.
+- **Documentation & Packaging:** Added `docs/LANGUAGE.md` (packaged in `zen/docs/` and surfaced via `zen docs`) and Chapter 23 `"What's New in ZEN 0.3"` in `docs/Learn-ZEN.pdf`.
+
 ## [0.2.4] - 2026-11-26
 
 ### Added

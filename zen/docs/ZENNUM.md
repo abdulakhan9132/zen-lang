@@ -37,7 +37,7 @@ You can also import without an alias (`import zennum`).
   ```zen
   let id = zn.eye(3)
   ```
-- `zn.seed(s)` — Set the random seed for reproducible arrays.
+- `zn.seed(s)` — Set the process-wide shared random seed (`_GLOBAL_RNG`) so `zennum`, `zennet`, and built-ins stay reproducible together.
   ```zen
   zn.seed(42)
   ```
@@ -133,3 +133,4 @@ You can also import without an alias (`import zennum`).
 - `zn.norm(a, axis = none, keepdims = false)` — Euclidean L2 norm.
 - `zn.gather(table, indices)` / `zn.scatter_add(shape, indices, values)` — Row gather and gradient scatter-add helpers.
 - `zn.backend` — Active kernel backend string (`"native-c"` or `"pure-python ..."`).
+- **Scientific debugging (`--nan-trace`):** Run `zen run --nan-trace script.zen` to catch any `NaN` or `Inf` inside ZenNum arithmetic, reductions, or `matmul` immediately with error `E014`, op name, shapes, and exact ZEN line.

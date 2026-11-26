@@ -1,0 +1,40 @@
+// What's New in ZEN 0.3: trust, everyday ergonomics, and standard library
+import json
+import stats
+import regex
+
+// 1. Trustworthy integer division (`div`) and f-strings
+let total = 7
+say f"7 / 2 = {total / 2}, 7 div 2 = {total div 2}"
+
+// 2. Optional types (`T?`), default/kwargs, multiple returns & destructuring
+fn range_stats(xs: list, scale: int = 1) {
+    let lo = xs[0] * scale
+    let hi = xs[0] * scale
+    for v in xs {
+        let s = v * scale
+        lo = if s < lo { s } else { lo }
+        hi = if s > hi { s } else { hi }
+    }
+    return lo, hi
+}
+
+let nums = [x * x for x in range(6) if x > 1]
+let lo, hi = range_stats(nums, scale = 10)
+say f"nums={nums}, scaled_range={lo}..{hi}"
+
+// 3. String/list methods, `in`, and `try` / `catch`
+let tag = "  zen,v0.3  ".strip().upper().split(",")
+assert "ZEN" in tag
+try {
+    let bad = 1 div 0
+} catch e {
+    say f"Caught [{e.code}] line {e.line}: {e.message}"
+}
+
+// 4. Built-in stdlib (`json`, `stats`, `regex`)
+let doc = json.parse("{\"vals\": [10, 20, 30]}")
+say f"mean={stats.mean(doc["vals"])}, tag={regex.replace("\\s+", "_", "ready to train")}"
+
+//> say 7 div 2
+// 3

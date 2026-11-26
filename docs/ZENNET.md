@@ -71,3 +71,9 @@ say x.grad   // [4.0, 6.0]
 - `nn.generate(model, prompt_ids, max_new_tokens, temperature = 1.0, top_k = none, strict = false)` — Autoregressive token sampling under `no_grad`. By default (`strict = false`), an empty prompt warns and falls back to token `0`; pass `strict = true` to raise an error on empty or out-of-range prompts.
 - `nn.accuracy(logits, targets)` — Classification accuracy fraction in `[0.0, 1.0]`.
 - `nn.perplexity(loss_val)` — Language-model perplexity $\exp(\text{loss})$.
+
+## Reliability, Debugging & Reproducibility (v0.3)
+
+- **`--nan-trace`:** Run `zen run --nan-trace train.zen` to fail fast with `E014` (reporting the failing op, tensor/array shapes, and ZEN source line) the moment a forward or backward op produces `NaN` or `Inf`.
+- **Reproducible runs (`--record` / `replay`):** Run `zen run --record run.json train.zen` (with `seed(...)` / `zn.seed(...)`) to log file SHA-256 digests and output hash, then verify exact reproduction with `zen replay run.json`.
+- **Shared RNG:** `seed(s)` and `zn.seed(s)` control one process-wide RNG across `nn.text_to_batches`, `nn.generate`, weight initialization, and `zennum`.

@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     guide_parser = subparsers.add_parser("guide", help="Open the Learn-ZEN.pdf beginner guide")
     guide_parser.add_argument("--path", action="store_true", help="Print the path to Learn-ZEN.pdf without opening it")
 
-    subparsers.add_parser("docs", help="Print paths to ZENNUM.md and ZENNET.md reference docs")
+    subparsers.add_parser("docs", help="Print paths to LANGUAGE.md, ZENNUM.md, and ZENNET.md reference docs")
 
     explain_parser = subparsers.add_parser("explain", help="Explain a ZEN error code (e.g. E001)")
     explain_parser.add_argument("code", nargs="?", default=None, help="Error code to explain")
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "docs":
         doc_paths = resolve_docs_paths()
         if not doc_paths:
-            print("Error: ZENNUM.md and ZENNET.md not found.", file=sys.stderr)
+            print("Error: LANGUAGE.md, ZENNUM.md, and ZENNET.md not found.", file=sys.stderr)
             return 1
         for name, p in doc_paths.items():
             print(f"{name}: {p}")

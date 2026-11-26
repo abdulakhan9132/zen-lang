@@ -47,7 +47,7 @@ ext_modules = (
 )
 
 setup(
-    version="0.2.4",
+    version="0.3.0",
     ext_modules=ext_modules,
     cmdclass={"build_ext": OptionalBuildExt},
 )

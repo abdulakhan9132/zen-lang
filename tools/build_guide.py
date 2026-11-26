@@ -94,7 +94,7 @@ class GuideDocTemplate(BaseDocTemplate):
         canvas.line(0.75 * inch, h - 0.6 * inch, w - 0.75 * inch, h - 0.6 * inch)
         canvas.setFont("Helvetica", 8.5)
         canvas.setFillColor(TEXT_MUTED)
-        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.2.4)")
+        canvas.drawString(0.75 * inch, h - 0.5 * inch, "Learn ZEN (v0.3.0)")
         canvas.drawRightString(w - 0.75 * inch, 0.45 * inch, f"Page {doc.page}")
         canvas.restoreState()
 
@@ -197,7 +197,7 @@ def build_pdf() -> int:
     story.append(Spacer(1, 0.55 * inch))
     story.append(
         Paragraph(
-            "Version 0.2.4<br/>By Abdullah Khan Suri",
+            "Version 0.3.0<br/>By Abdullah Khan Suri",
             ParagraphStyle("CoverMeta", fontName="Helvetica-Bold", fontSize=12, leading=18, textColor=PURPLE, alignment=TA_CENTER),
         )
     )
@@ -669,8 +669,20 @@ def build_pdf() -> int:
         story.append(Spacer(1, 4))
     story.append(PageBreak())
 
+    # Chapter 23: What's New in ZEN 0.3
+    add_chapter(
+        "23. What's New in ZEN 0.3",
+        "Trustworthy math, everyday language ergonomics, a 10-module standard library, scientific debugging, and reproducibility.",
+        "31_whats_new_03.zen",
+        [
+            "Trustworthy core: explicit `div` / `floor_div`, `f\"...\"` interpolation, optional `T?` types with flow narrowing, `E001`–`E014` (`zen explain`), and iterative VM frames supporting recursion depth `10,000` (`--debug` for tracebacks).",
+            "Everyday ergonomics: `try` / `catch e` / `raise`, keyword arguments, `in` / `not in`, `if`-expressions, list comprehensions, string/list methods, multiple returns & destructuring, and `input(prompt)`.",
+            "Stdlib & scientific safety: `json`, `files`, `path`, `regex`, `datetime`, `env`, `csv`, `process`, `http`, `stats`; `--nan-trace`, `--record` / `zen replay`, and `zen test --doc`.",
+        ],
+    )
+
     # Comparison page: ZenNum and ZenNet vs NumPy and PyTorch
-    story.append(Paragraph("23. ZenNum and ZenNet vs NumPy and PyTorch", title_style))
+    story.append(Paragraph("24. ZenNum and ZenNet vs NumPy and PyTorch", title_style))
     story.append(Paragraph("If you already know Python's AI stack, here is how ZEN compares side-by-side.", one_liner_style))
     cmp_rows = [
         ["Concept", "Python (NumPy / PyTorch)", "ZEN (ZenNum / ZenNet)"],
@@ -702,20 +714,20 @@ def build_pdf() -> int:
     story.append(cmp_tbl)
     story.append(PageBreak())
 
-    # Chapter 24: Current Limitations and Roadmap
-    story.append(Paragraph("24. Current limitations and roadmap", title_style))
-    story.append(Paragraph("What ZEN v0.2.4 can do today, and what is still planned for future versions.", one_liner_style))
+    # Chapter 25: Current Limitations and Roadmap
+    story.append(Paragraph("25. Current limitations and roadmap", title_style))
+    story.append(Paragraph("What ZEN v0.3.0 can do today, and what is still planned for future versions.", one_liner_style))
     limits = [
         ("CPU-only execution:", "Pure-Python flat buffers run when no C compiler is present (~0.63s for 256x256 matmul; ~180–260 ms/step on a 1-layer d_model=16 GPT), with optional native C kernels (`zen/native/zen_kernels.c`). No GPU/CUDA yet."),
         ("Tiny GPT scale:", "Models and examples target low-RAM laptops using character/small-BPE corpora rather than large foundation models."),
-        ("No native compiler yet:", "Programs run on the Python bytecode VM (`zen run`). LLVM/AOT compilation, external package manager, and LSP remain future work."),
+        ("No native compiler yet:", "Programs run on the Python bytecode VM (`zen run`). See `docs/design/` for planned v1.0 C backend, shape checks, units, `@`, `grad`/`train`, and safetensors."),
     ]
     for head, body in limits:
         story.append(Paragraph(f"<b>{escape(head)}</b> {escape(body)}", note_style))
     story.append(Spacer(1, 8))
     story.append(Paragraph("Roadmap", subhead_style))
-    story.append(Paragraph("v0.2.2-v0.2.4: Bytecode VM, static type checker (`let x = none` widening), VS Code extension, ZenNum N-D arrays (`tril`/`triu`), ZenNet autograd (`concat`/`stack`/`tril`/`triu`), strict tokenizer/generate mode, process-wide shared RNG, `zen doctor`, `zen docs`, and Learn-ZEN guide.", note_style))
-    story.append(Paragraph("Future: Prebuilt multi-platform native C wheels, GPU/SIMD backends, native compiler, and LSP.", note_style))
+    story.append(Paragraph("v0.2.2-v0.3.0: Bytecode VM with iterative recursion (depth 10,000), `div`, `f\"...\"`, `T?` narrowing, `E001`–`E014` (`zen explain`), `try`/`catch`/`raise`, kwargs, list comprehensions, `in`, string/list methods, multiple returns, 10-module stdlib, `--nan-trace`, `--record`/`zen replay`, `zen test --doc`, ZenNum N-D arrays, ZenNet autograd, `zen doctor`, `zen docs`, and `LANGUAGE.md`.", note_style))
+    story.append(Paragraph("Future: Prebuilt multi-platform native C wheels, ZEN-to-C backend (`docs/design/`), GPU/SIMD backends, and LSP.", note_style))
 
     PDF_OUT.parent.mkdir(parents=True, exist_ok=True)
     doc = GuideDocTemplate(

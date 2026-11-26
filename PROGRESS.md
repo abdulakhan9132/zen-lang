@@ -39,7 +39,16 @@
 - **Status:** Complete
 - **Notes:** Universal `py3-none-any` wheel & sdist, opt-in C extension (`ZEN_BUILD_NATIVE=1`), `zen doctor`, cross-platform CI, and CI test compatibility fixes.
 
-## Release `v0.2.4` (Current)
+## Release `v0.3.0` (Current)
+- **Status:** Complete (committed & tagged locally as `v0.3.0`; `dist/zen_lang-0.3.0-py3-none-any.whl` and `dist/zen_lang-0.3.0.tar.gz` built and verified in clean venv)
+- **Notes:**
+  - **Stage 1 (Trust):** Added `div` / `floor_div`, `f"..."` strings, `T?` optional types & `any` flow narrowing, `E001`–`E014` + `zen explain`, `did_you_mean` hints, iterative `_VMFrame` heap stack (recursion depth `10,000`, `--max-depth`), and `--debug` traceback gating.
+  - **Stage 2 (Everyday):** Added `try`/`catch`/`raise`, keyword arguments, `in`/`not in`, `if`-expressions, list comprehensions, string & list methods, string `*` repeat, multiple return values & destructuring/swap, and `input(prompt)`.
+  - **Stage 3 (Stdlib & Scientific Safety):** Added `json`, `files`, `path`, `regex`, `datetime`, `env`, `csv`, `process`, `http`, `stats` (`statistics`) stdlib modules, `zen run --nan-trace`, `zen run --record` + `zen replay`, `zen test --doc`, and marked slow training tests (`tests/test_phase10.py`, `tests/test_phase11.py`).
+  - **Stage 4 (Design Memos):** Added `docs/design/01`–`07` covering C backend, shape checks/cost, units, index notation, `grad`/`train` blocks, safetensors, and v1.0 freeze checklist.
+  - **Docs & Packaging:** Created `docs/LANGUAGE.md`, updated `docs/ZENNUM.md` & `docs/ZENNET.md`, packaged docs in `zen/docs/` (`zen docs`), added Chapter 23 `"What's New in ZEN 0.3"` to `docs/Learn-ZEN.pdf`, and built universal `0.3.0` wheel & sdist.
+
+## Release `v0.2.4`
 - **Status:** Complete (committed & tagged locally as `v0.2.4`; `dist/zen_lang-0.2.4-py3-none-any.whl` and `dist/zen_lang-0.2.4.tar.gz` built and verified in clean venv)
 - **Notes:**
   - Process-wide shared `_GLOBAL_RNG` in `zen/builtins.py` fixing `seed()` / `zn.seed()` determinism across `zennet.data`, `zennet.train`, VM, and tree-walk interpreter.

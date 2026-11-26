@@ -306,12 +306,14 @@ say "defaults=" + str(e1) + "|" + str(e2) + "|" + str(b1) + "|" + str(b2) + "|" 
 def test_zen_docs_cli_and_packaged_markdown(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli_main(["docs"]) == 0
     out = capsys.readouterr().out
+    assert "LANGUAGE.md:" in out
     assert "ZENNUM.md:" in out
     assert "ZENNET.md:" in out
     for line in out.strip().splitlines():
         _, path_str = line.split(": ", 1)
         assert Path(path_str).is_file()
 
+    assert (REPO / "zen" / "docs" / "LANGUAGE.md").is_file()
     assert (REPO / "zen" / "docs" / "ZENNUM.md").is_file()
     assert (REPO / "zen" / "docs" / "ZENNET.md").is_file()
 

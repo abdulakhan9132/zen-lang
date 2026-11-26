@@ -21,9 +21,9 @@ def resolve_guide_pdf_path() -> Path | None:
 
 
 def resolve_docs_paths() -> dict[str, Path]:
-    """Return resolved paths for packaged reference docs (ZENNUM.md, ZENNET.md)."""
+    """Return resolved paths for packaged reference docs (LANGUAGE.md, ZENNUM.md, ZENNET.md)."""
     found: dict[str, Path] = {}
-    for name in ("ZENNUM.md", "ZENNET.md"):
+    for name in ("LANGUAGE.md", "ZENNUM.md", "ZENNET.md"):
         for root in (_PKG_DOCS, _REPO_DOCS):
             candidate = root / name
             if candidate.is_file():
