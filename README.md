@@ -4,6 +4,8 @@
 
 # ZEN (v0.2.4)
 
+[![CI](https://github.com/abdulakhan9132/zen-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/abdulakhan9132/zen-lang/actions/workflows/ci.yml)
+
 **ZEN is the language. ZenNum handles numbers. ZenNet builds neural networks.**
 
 A minimal, readable programming language built from scratch for learning coding and building real AI models (from linear regression to Transformer GPTs) in pure `.zen` code — with zero external AI libraries (`numpy`/`torch` never used).
@@ -20,8 +22,8 @@ Modern Ubuntu/Debian systems enforce PEP 668 (`error: externally-managed-environ
 
 1. `sudo apt install -y pipx`
 2. `pipx ensurepath`
-3. Close and reopen the terminal.
-4. `pipx install <wheel URL>` (for example, `https://github.com/abdulakhan9132/zen-lang/releases/download/v0.2.3/zen_lang-0.2.3-py3-none-any.whl`)
+3. Open a new terminal (required so `~/.local/bin` from `pipx ensurepath` is on `PATH`).
+4. `pipx install https://github.com/abdulakhan9132/zen-lang/releases/download/v0.2.4/zen_lang-0.2.4-py3-none-any.whl`
 5. `zen doctor`
 
 If `zen` is not found, run `source ~/.bashrc` or open a new terminal.

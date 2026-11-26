@@ -35,6 +35,25 @@
 - **Status:** Done (`97` tests cumulative)
 - **Notes:** Added `docs/ZENNUM.md`, `docs/ZENNET.md`, Part A & B runnable guide examples, cheat sheets, 16 new exercises, comparison table, and rebuilt 46-page `docs/Learn-ZEN.pdf`.
 
-## Phase I: Packaging & Release Prep (`v0.2.0`)
+## Phase I: Packaging & Release Prep (`v0.2.0` – `v0.2.3`)
 - **Status:** Complete
-- **Notes:** Bumped to `0.2.0`, added optional C extension in `setup.py`, `.github/workflows/wheels.yml` (`cibuildwheel`), built wheel & sdist, verified in a clean venv.
+- **Notes:** Universal `py3-none-any` wheel & sdist, opt-in C extension (`ZEN_BUILD_NATIVE=1`), `zen doctor`, cross-platform CI, and CI test compatibility fixes.
+
+## Release `v0.2.4` (Current)
+- **Status:** Complete (committed & tagged locally as `v0.2.4`; `dist/zen_lang-0.2.4-py3-none-any.whl` and `dist/zen_lang-0.2.4.tar.gz` built and verified in clean venv)
+- **Notes:**
+  - Process-wide shared `_GLOBAL_RNG` in `zen/builtins.py` fixing `seed()` / `zn.seed()` determinism across `zennet.data`, `zennet.train`, VM, and tree-walk interpreter.
+  - Added `zn.tril` / `zn.triu` and differentiable `nn.concat`, `nn.stack`, `nn.tril`, `nn.triu` with numerical gradient checks.
+  - Type checker widening for unannotated `let x = none`.
+  - Optional `strict` flag on `CharTokenizer.encode`, `BPETokenizer.encode`, and `nn.generate` (warning + legacy fallbacks by default; error when `strict = true`).
+  - Packaged `ZENNUM.md` / `ZENNET.md` inside `zen/docs/`, added `zen docs`, fixed PDF clipping on pages 33/39/40/43/47, and updated Chapters 15–17 to use `zennum`/`zennet`.
+  - Tests: `107` fast pytest tests (`2` slow deselected) + `5` `.zen` self-tests passing.
+
+## Post-`v0.2.4` Cleanup (CI & Docs)
+- **Status:** Complete (committed locally, not pushed)
+- **Notes:** Updated `.github/workflows/ci.yml` and `.github/workflows/wheels.yml` to `actions/checkout@v7` and `actions/setup-python@v7` (Node 24 native), added CI badge and `v0.2.4` Ubuntu `pipx` install instructions to `README.md`, and updated `PROGRESS.md`.
+
+## Next Planned Items
+- Push local commits and `v0.2.4` tag to GitHub and publish the `v0.2.4` GitHub release with `dist/zen_lang-0.2.4-py3-none-any.whl` and `dist/zen_lang-0.2.4.tar.gz`.
+- Build and ship prebuilt multi-platform native C kernel wheels via `.github/workflows/wheels.yml`.
+- Explore GPU/SIMD backends (see `docs/GPU_PLAN.md`), native AOT compilation, and LSP support.
