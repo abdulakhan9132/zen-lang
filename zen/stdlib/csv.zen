@@ -1,0 +1,16 @@
+// ZEN CSV standard library module
+fn parse(text: string) -> list {
+    return _zenstd_rt.csv_parse(text)
+}
+
+fn stringify(rows: list) -> string {
+    return _zenstd_rt.csv_stringify(rows)
+}
+
+fn read(path: string) -> list {
+    return _zenstd_rt.csv_read(path)
+}
+
+fn write(path: string, rows: list) {
+    _zenstd_rt.csv_write(path, rows)
+}

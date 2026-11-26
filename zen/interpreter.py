@@ -10,12 +10,14 @@ import re
 from typing import Any, Callable
 
 from zen import ast
+from zen import nan_trace
 from zen.builtins import register_phase4_builtins
 from zen.environment import Environment
 from zen.errors import ZenError, ZenRuntimeError, did_you_mean
 from zen.lexer import tokenize_with_comments
 from zen.parser import parse
 from zen.paths import resolve_import_path
+from zen.recorder import record_zen_access
 from zen.tensor import ZenTensor
 from zen.typechecker import type_check_program
 from zen.zennum_core import ZenArray
@@ -125,8 +127,16 @@ class ZenBuiltin:
     ) -> Any:
         try:
             if kwargs:
-                return self.fn(*args, **kwargs)
-            return self.fn(*args)
+                res = self.fn(*args, **kwargs)
+            else:
+                res = self.fn(*args)
+            if nan_trace.ENABLED:
+                nan_trace.check_value(res, self.name, args[0] if args else None, args[1] if len(args) > 1 else None, line=line, col=col)
+            return res
+        except OverflowError as exc:
+            if nan_trace.ENABLED:
+                raise ZenRuntimeError(f"Inf produced by '{self.name}' (overflow)", line, col, code="E014") from exc
+            raise ZenRuntimeError(f"Built-in '{self.name}' overflow error: {exc}", line, col, code="E004") from exc
         except ZenRuntimeError:
             raise
         except TypeError as exc:
@@ -547,6 +557,7 @@ class Interpreter:
 
     def run_file(self, path: str | Path, *, type_check: bool = False) -> Environment:
         p = Path(path).resolve()
+        record_zen_access(p)
         source = p.read_text(encoding="utf-8")
         return self.run(source, file_path=p, type_check=type_check)
 
@@ -557,6 +568,8 @@ class Interpreter:
     def execute(self, node: ast.Node, env: Environment) -> None:
         if node.line:
             self.current_line = node.line
+            if nan_trace.ENABLED:
+                nan_trace.set_location(node.line, node.column)
         if isinstance(node, ast.LetStmt):
             val = self.evaluate(node.value, env)
             env.define(node.name, val, is_const=False)
@@ -1005,6 +1018,14 @@ class Interpreter:
         return False, None
 
     def _eval_binary(self, node: ast.BinaryExpr, env: Environment) -> Any:
+        if nan_trace.ENABLED and node.line:
+            nan_trace.set_location(node.line, node.column)
+        res = self._eval_binary_impl(node, env)
+        if nan_trace.ENABLED:
+            nan_trace.check_value(res, node.op, line=node.line, col=node.column)
+        return res
+
+    def _eval_binary_impl(self, node: ast.BinaryExpr, env: Environment) -> Any:
         if node.op == "and":
             left = self.evaluate(node.left, env)
             return self.evaluate(node.right, env) if is_truthy(left) else left

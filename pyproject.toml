@@ -40,6 +40,7 @@ include = ["zen*"]
 
 [tool.setuptools.package-data]
 zen = [
+    "stdlib/*.zen",
     "stdlib/ai/*.zen",
     "stdlib/zennum/*.zen",
     "stdlib/zennet/*.zen",

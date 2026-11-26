@@ -1,0 +1,20 @@
+// ZEN Regex standard library module
+fn match(pattern: string, text: string) -> bool {
+    return _zenstd_rt.re_match(pattern, text)
+}
+
+fn search(pattern: string, text: string) -> string? {
+    return _zenstd_rt.re_search(pattern, text)
+}
+
+fn find_all(pattern: string, text: string) -> list {
+    return _zenstd_rt.re_find_all(pattern, text)
+}
+
+fn replace(pattern: string, repl: string, text: string) -> string {
+    return _zenstd_rt.re_replace(pattern, repl, text)
+}
+
+fn split(pattern: string, text: string) -> list {
+    return _zenstd_rt.re_split(pattern, text)
+}

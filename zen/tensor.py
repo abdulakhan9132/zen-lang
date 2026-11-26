@@ -11,6 +11,7 @@ import random
 from typing import Any, Callable
 
 from zen.errors import ZenRuntimeError
+from zen import nan_trace
 from zen import native_kernels
 
 
@@ -288,7 +289,14 @@ class ZenTensor:
         return self._rev_elementwise(scalar, _safe_div)
 
     def exp(self) -> "ZenTensor":
-        return ZenTensor(list(map(math.exp, self.data)), self.shape)
+        try:
+            res = ZenTensor(list(map(math.exp, self.data)), self.shape)
+        except OverflowError as exc:
+            if nan_trace.ENABLED:
+                raise ZenRuntimeError(f"Inf produced by 'tensor.exp' (shape: {list(self.shape)})", code="E014") from exc
+            res = ZenTensor([math.inf if x > 0 else 0.0 for x in self.data], self.shape)
+        nan_trace.check_value(res, "tensor.exp", self)
+        return res
 
     def log(self) -> "ZenTensor":
         out: list[float] = []

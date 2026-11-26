@@ -1,0 +1,28 @@
+// ZEN Statistics standard library module
+fn mean(xs: any) -> float {
+    return _zenstd_rt.stats_mean(xs)
+}
+
+fn median(xs: any) -> float {
+    return _zenstd_rt.stats_median(xs)
+}
+
+fn std(xs: any, ddof: int = 0) -> float {
+    return _zenstd_rt.stats_std(xs, ddof)
+}
+
+fn var(xs: any, ddof: int = 0) -> float {
+    return _zenstd_rt.stats_var(xs, ddof)
+}
+
+fn min(xs: any) -> float {
+    return _zenstd_rt.stats_min(xs)
+}
+
+fn max(xs: any) -> float {
+    return _zenstd_rt.stats_max(xs)
+}
+
+fn sum(xs: any) -> float {
+    return _zenstd_rt.stats_sum(xs)
+}

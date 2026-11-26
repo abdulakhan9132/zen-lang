@@ -11,12 +11,17 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
+from zen import nan_trace
 from zen import native_kernels
+from zen.builtins import reset_recorded_seed
+from zen.doctest import run_doctests
 from zen.errors import ZenError, format_error_explanation
 from zen.formatter import format_file
 from zen.interpreter import Interpreter, zen_format
 from zen.paths import resolve_docs_paths, resolve_guide_pdf_path, resolve_stdlib_path
+from zen.recorder import RunRecorder, replay_manifest, set_active_recorder, write_manifest
 from zen.spec import VERSION
+from zen.stdlib_rt import set_script_argv
 from zen.typechecker import type_check_source
 from zen.vm import VM
 
@@ -130,9 +135,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum function call recursion depth (default: 10000)",
     )
     run_parser.add_argument(
+        "--nan-trace",
+        action="store_true",
+        help="Stop at the first operation producing NaN or Inf and report op, shapes, and line",
+    )
+    run_parser.add_argument(
+        "--record",
+        default=None,
+        help="Record run manifest (seed, file SHA-256s, output hash) to JSON file",
+    )
+    run_parser.add_argument(
         "--debug",
         action="store_true",
         help="Show raw Python tracebacks on internal errors",
+    )
+    run_parser.add_argument(
+        "script_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments passed to env.argv()",
     )
 
     repl_parser = subparsers.add_parser("repl", help="Start interactive ZEN REPL")
@@ -150,7 +170,11 @@ def main(argv: list[str] | None = None) -> int:
     check_parser.add_argument("file", help="Path to the .zen file")
 
     test_parser = subparsers.add_parser("test", help="Run all .zen test files in tests_zen/")
-    test_parser.add_argument("dir", nargs="?", default="tests_zen", help="Test directory (default: tests_zen)")
+    test_parser.add_argument("dir", nargs="?", default=None, help="Test directory or file (default: tests_zen)")
+    test_parser.add_argument("--doc", action="store_true", help="Run //> doctests in .zen files")
+
+    replay_parser = subparsers.add_parser("replay", help="Replay a recorded run.json manifest and verify MATCH/MISMATCH")
+    replay_parser.add_argument("manifest", help="Path to recorded run.json manifest")
 
     guide_parser = subparsers.add_parser("guide", help="Open the Learn-ZEN.pdf beginner guide")
     guide_parser.add_argument("--path", action="store_true", help="Print the path to Learn-ZEN.pdf without opening it")
@@ -251,7 +275,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "test":
-        test_dir = Path(args.dir)
+        if args.doc:
+            if args.dir is None:
+                doc_paths: list[Path] = []
+                for root_d in (Path("docs/guide_examples"), Path("tests_zen")):
+                    if root_d.is_dir():
+                        doc_paths.extend(sorted(root_d.glob("*.zen")))
+            else:
+                target = Path(args.dir)
+                if target.is_file():
+                    doc_paths = [target]
+                elif target.is_dir():
+                    doc_paths = sorted(target.glob("*.zen"))
+                else:
+                    print(f"Error: path not found: {target}", file=sys.stderr)
+                    return 1
+            if not doc_paths:
+                print("No .zen files found for doctests", file=sys.stderr)
+                return 1
+            passed, failed, msgs = run_doctests(doc_paths)
+            for m in msgs:
+                print(m, file=sys.stderr if m.startswith("FAIL") else sys.stdout)
+            print(f"ZEN doctests: {passed} passed, {failed} failed")
+            return 0 if failed == 0 else 1
+
+        test_dir = Path(args.dir or "tests_zen")
         if not test_dir.is_dir():
             print(f"Error: test directory not found: {test_dir}", file=sys.stderr)
             return 1
@@ -277,16 +325,65 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ZEN tests: {passed} passed, {failed} failed")
         return 0 if failed == 0 else 1
 
+    if args.command == "replay":
+        manifest_path = Path(args.manifest)
+        if not manifest_path.is_file():
+            print(f"Error: manifest not found: {manifest_path}", file=sys.stderr)
+            return 1
+        try:
+            matched, report = replay_manifest(manifest_path)
+            print(report)
+            return 0 if matched else 1
+        except ZenError as exc:
+            print(f"ZEN Error: {exc}", file=sys.stderr)
+            return 1
+        except Exception:
+            if debug_mode:
+                raise
+            print("internal error, please report", file=sys.stderr)
+            return 1
+
     if args.command == "run":
         file_path = Path(args.file)
         if not file_path.is_file():
             print(f"Error: file not found: {file_path}", file=sys.stderr)
             return 1
+        script_args = list(args.script_args)
+        if script_args and script_args[0] == "--":
+            script_args = script_args[1:]
+        set_script_argv([str(file_path)] + script_args)
+
+        recorder: RunRecorder | None = None
+        capture_buf: io.StringIO | None = None
+        if args.record:
+            reset_recorded_seed()
+            recorder = RunRecorder(root_dir=Path.cwd().resolve())
+            set_active_recorder(recorder)
+            capture_buf = io.StringIO()
+
+        nan_trace.set_enabled(bool(args.nan_trace))
         engine: VM | Interpreter = (
-            Interpreter(max_depth=args.max_depth) if args.tree_walk else VM(max_depth=args.max_depth)
+            Interpreter(stdout=capture_buf, max_depth=args.max_depth)
+            if args.tree_walk
+            else VM(stdout=capture_buf, max_depth=args.max_depth)
         )
         try:
             engine.run_file(file_path, type_check=not args.no_check)
+            if recorder is not None and capture_buf is not None:
+                out_text = capture_buf.getvalue()
+                if out_text:
+                    sys.stdout.write(out_text)
+                write_manifest(
+                    Path(args.record),
+                    recorder=recorder,
+                    entry_file=file_path,
+                    script_args=script_args,
+                    tree_walk=bool(args.tree_walk),
+                    no_check=bool(args.no_check),
+                    nan_trace_flag=bool(args.nan_trace),
+                    max_depth=int(args.max_depth),
+                    stdout_text=out_text,
+                )
         except ZenError as exc:
             print(f"ZEN Error: {exc}", file=sys.stderr)
             return 1
@@ -296,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
             line_info = f" at ZEN line {engine.current_line}" if getattr(engine, "current_line", 0) else ""
             print(f"internal error, please report{line_info}", file=sys.stderr)
             return 1
+        finally:
+            nan_trace.set_enabled(False)
+            set_active_recorder(None)
         return 0
     return 1
 

@@ -1,0 +1,32 @@
+// ZEN Path standard library module
+fn join(parts: list) -> string {
+    return _zenstd_rt.path_join(parts)
+}
+
+fn basename(p: string) -> string {
+    return _zenstd_rt.path_basename(p)
+}
+
+fn dirname(p: string) -> string {
+    return _zenstd_rt.path_dirname(p)
+}
+
+fn stem(p: string) -> string {
+    return _zenstd_rt.path_stem(p)
+}
+
+fn ext(p: string) -> string {
+    return _zenstd_rt.path_ext(p)
+}
+
+fn resolve(p: string) -> string {
+    return _zenstd_rt.path_resolve(p)
+}
+
+fn cwd() -> string {
+    return _zenstd_rt.path_cwd()
+}
+
+fn sep() -> string {
+    return _zenstd_rt.path_sep()
+}

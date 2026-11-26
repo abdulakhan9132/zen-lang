@@ -6,3 +6,6 @@ let r = zn.arange(0, 10, 2)
 say "a = " + str(a)
 say "z = " + str(z)
 say "r = " + str(r)
+//> import zennum as zn
+//> say zn.arange(0, 10, 2).tolist()
+// [0, 2, 4, 6, 8]

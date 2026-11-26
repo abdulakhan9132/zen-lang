@@ -1,0 +1,8 @@
+// ZEN JSON standard library module
+fn parse(text: string) -> any {
+    return _zenstd_rt.json_parse(text)
+}
+
+fn stringify(val: any, indent: any = none) -> string {
+    return _zenstd_rt.json_stringify(val, indent)
+}

@@ -1,0 +1,24 @@
+// ZEN Datetime standard library module
+fn now() -> string {
+    return _zenstd_rt.dt_now()
+}
+
+fn today() -> string {
+    return _zenstd_rt.dt_today()
+}
+
+fn timestamp() -> float {
+    return _zenstd_rt.dt_timestamp()
+}
+
+fn format(ts: any, fmt: string = "%Y-%m-%d %H:%M:%S") -> string {
+    return _zenstd_rt.dt_format(ts, fmt)
+}
+
+fn parse(text: string, fmt: string = "%Y-%m-%d %H:%M:%S") -> float {
+    return _zenstd_rt.dt_parse(text, fmt)
+}
+
+fn iso(ts: any = none) -> string {
+    return _zenstd_rt.dt_iso(ts)
+}

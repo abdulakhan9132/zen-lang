@@ -242,6 +242,7 @@ def _builtin_bindings() -> dict[str, _Binding]:
         "clock": fn(0, 0, FLOAT),
         "fields": fn(1, 1, MAP),
         "_zennum_rt": _Binding(ANY, is_const=True),
+        "_zenstd_rt": _Binding(ANY, is_const=True),
     }
 
 

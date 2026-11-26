@@ -1,0 +1,4 @@
+// ZEN Process runner standard library module
+fn run(cmd: any, cwd: any = none) -> map {
+    return _zenstd_rt.proc_run(cmd, cwd)
+}

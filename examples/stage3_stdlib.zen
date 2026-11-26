@@ -1,0 +1,16 @@
+// Stage 3 Example: Standard library (json, csv, regex, datetime, path, stats)
+import json
+import csv
+import regex
+import datetime
+import path
+import stats
+
+let payload = json.parse("{\"project\": \"ZEN\", \"scores\": [80, 90, 100]}")
+say f"Project: {payload["project"]}, mean={stats.mean(payload["scores"])}, std={round(stats.std(payload["scores"]), 2)}"
+
+let table = csv.parse("item,qty\napples,4\nbananas,6\n")
+say f"CSV row 1: {table[1]}"
+say f"Cleaned: {regex.replace("\\s+", "_", "zen ai stdlib")}"
+say f"Joined path: {path.join(["docs", "LANGUAGE.md"])}"
+say f"Today: {datetime.today()}"

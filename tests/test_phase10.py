@@ -3,11 +3,14 @@
 import io
 from pathlib import Path
 
+import pytest
+
 from zen.interpreter import Interpreter
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
+@pytest.mark.slow
 def test_phase10_xor_and_gpt_learn_with_adam() -> None:
     buf = io.StringIO()
     interp = Interpreter(stdout=buf)

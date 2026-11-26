@@ -12,3 +12,6 @@ fn make_adder(base) {
 let add10 = make_adder(10)
 say add(2, 3)
 say add10(5)
+//> fn sq(n) { return n * n }
+//> say sq(6)
+// 36

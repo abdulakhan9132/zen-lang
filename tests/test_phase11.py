@@ -3,6 +3,8 @@
 import io
 from pathlib import Path
 
+import pytest
+
 from zen.interpreter import Interpreter
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,6 +17,7 @@ def test_corpus_size_between_200kb_and_500kb() -> None:
     assert 200_000 <= size <= 500_000, f"Unexpected corpus size: {size} bytes"
 
 
+@pytest.mark.slow
 def test_phase11_minibatch_train_and_val_loss_drop() -> None:
     buf = io.StringIO()
     interp = Interpreter(stdout=buf)

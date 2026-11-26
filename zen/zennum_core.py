@@ -11,6 +11,7 @@ import random
 from typing import Any, Callable
 
 from zen.errors import ZenRuntimeError
+from zen import nan_trace
 from zen import native_kernels
 
 VALID_DTYPES = ("float64", "float32", "int64", "bool")
@@ -433,14 +434,20 @@ class ZenArray:
                 vals = map(fn, repeat(val), self.data)
             else:
                 vals = map(fn, self.data, repeat(val))
-            return ZenArray(_make_buffer(vals, od), self.shape, od)
+            res = ZenArray(_make_buffer(vals, od), self.shape, od)
+            if nan_trace.ENABLED:
+                nan_trace.check_value(res, fn.__name__, self, val)
+            return res
         if not isinstance(other, ZenArray):
             raise ZenRuntimeError(f"Array operation requires another Array or number, got '{type(other).__name__}'")
 
         od = out_dtype or _promote_dtype(self.dtype, other.dtype)
         if self.shape == other.shape:
             vals = map(fn, self.data, other.data)
-            return ZenArray(_make_buffer(vals, od), self.shape, od)
+            res = ZenArray(_make_buffer(vals, od), self.shape, od)
+            if nan_trace.ENABLED:
+                nan_trace.check_value(res, fn.__name__, self, other)
+            return res
 
         out_shape = _broadcast_shapes(self.shape, other.shape)
         ndim = len(out_shape)
@@ -521,7 +528,14 @@ class ZenArray:
                 vals.append(math.sqrt(x))
             return ZenArray(_make_buffer(vals, dt), self.shape, dt)
         if name == "exp":
-            return ZenArray(_make_buffer(map(math.exp, self.data), dt), self.shape, dt)
+            try:
+                res = ZenArray(_make_buffer(map(math.exp, self.data), dt), self.shape, dt)
+            except OverflowError as exc:
+                if nan_trace.ENABLED:
+                    raise ZenRuntimeError(f"Inf produced by 'exp' (shape: {list(self.shape)})", code="E014") from exc
+                res = ZenArray(_make_buffer([math.inf if x > 0 else 0.0 for x in self.data], dt), self.shape, dt)
+            nan_trace.check_value(res, "array.exp", self)
+            return res
         if name == "log":
             vals = []
             for x in self.data:

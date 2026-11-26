@@ -1,0 +1,40 @@
+// ZEN Files standard library module
+fn read(path: string) -> string {
+    return _zenstd_rt.file_read(path)
+}
+
+fn write(path: string, content: any) {
+    _zenstd_rt.file_write(path, content)
+}
+
+fn append(path: string, content: any) {
+    _zenstd_rt.file_append(path, content)
+}
+
+fn exists(path: string) -> bool {
+    return _zenstd_rt.file_exists(path)
+}
+
+fn is_file(path: string) -> bool {
+    return _zenstd_rt.file_is_file(path)
+}
+
+fn is_dir(path: string) -> bool {
+    return _zenstd_rt.file_is_dir(path)
+}
+
+fn mkdir(path: string) {
+    _zenstd_rt.file_mkdir(path)
+}
+
+fn remove(path: string) {
+    _zenstd_rt.file_remove(path)
+}
+
+fn list_dir(path: string = ".") -> list {
+    return _zenstd_rt.file_list_dir(path)
+}
+
+fn copy(src: string, dst: string) {
+    _zenstd_rt.file_copy(src, dst)
+}

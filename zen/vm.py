@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from zen import ast
+from zen import nan_trace
 from zen.builtins import register_phase4_builtins
 from zen.bytecode import CodeObject, Op
 from zen.compiler import compile_program
 from zen.environment import Environment
 from zen.errors import ZenError, ZenRuntimeError, did_you_mean
+from zen.recorder import record_zen_access
 from zen.interpreter import (
     ZenBuiltin,
     ZenClass,
@@ -346,6 +348,7 @@ class VM:
 
     def run_file(self, path: str | Path, *, type_check: bool = False) -> Environment:
         p = Path(path).resolve()
+        record_zen_access(p)
         source = p.read_text(encoding="utf-8")
         self.run(source, file_path=p, type_check=type_check)
         return self.globals
@@ -414,6 +417,8 @@ class VM:
                         cur_ip = ip
                         ip += 1
                         self.current_line = lines[cur_ip]
+                        if nan_trace.ENABLED:
+                            nan_trace.set_location(lines[cur_ip], cols[cur_ip])
 
                         if op == _OP_LOAD_CONST:
                             push(arg)
@@ -563,7 +568,7 @@ class VM:
                             left = pop()
                             tl = type(left)
                             tr = type(right)
-                            if (tl is int or tl is float) and (tr is int or tr is float):
+                            if not nan_trace.ENABLED and (tl is int or tl is float) and (tr is int or tr is float):
                                 if arg == "+":
                                     push(left + right)
                                     continue
@@ -929,6 +934,12 @@ class VM:
         raise ZenRuntimeError(f"Tensor has no member '{member}'", line, col)
 
     def _binary_op(self, left: Any, op: str, right: Any, line: int, col: int) -> Any:
+        res = self._binary_op_impl(left, op, right, line, col)
+        if nan_trace.ENABLED:
+            nan_trace.check_value(res, op, left, right, line, col)
+        return res
+
+    def _binary_op_impl(self, left: Any, op: str, right: Any, line: int, col: int) -> Any:
         if op in _DUNDER_MAP:
             d, rd = _DUNDER_MAP[op]
             if isinstance(left, ZenInstance):

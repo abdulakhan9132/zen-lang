@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zen.errors import ZenRuntimeError
+from zen import nan_trace
 from zen import native_kernels
+from zen.recorder import record_data_access
 from zen.tensor import ZenTensor
 from zen.zennum_core import (
     ZenArray,
@@ -254,7 +256,8 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
             if alt.is_file():
                 p = alt
         if not p.is_file():
-            raise ZenRuntimeError(f"File not found: '{path}'")
+            raise ZenRuntimeError(f"File not found: '{path}'", code="E009")
+        record_data_access(p)
         return p.read_text(encoding="utf-8")
 
     def _write_file(path: Any, content: Any) -> None:
@@ -322,7 +325,8 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
             if alt.is_file():
                 p = alt
         if not p.is_file():
-            raise ZenRuntimeError(f"Weights file not found: '{path}'")
+            raise ZenRuntimeError(f"Weights file not found: '{path}'", code="E009")
+        record_data_access(p)
         return _deserialize_weights(json.loads(p.read_text(encoding="utf-8")))
 
     def _assert(cond: Any, message: Any = "Assertion failed") -> None:
@@ -546,3 +550,6 @@ def register_phase4_builtins(interp: "Interpreter", make_builtin: type["ZenBuilt
     for name, fn in builtins.items():
         interp.globals.define(name, make_builtin(name, fn))
     interp.globals.define("_zennum_rt", _make_zennum_rt())
+    from zen.stdlib_rt import make_stdlib_rt
+
+    interp.globals.define("_zenstd_rt", make_stdlib_rt(interp, make_builtin))

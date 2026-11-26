@@ -1,0 +1,8 @@
+// ZEN HTTP standard library module
+fn get(url: string, headers: any = none, timeout: any = 10.0) -> map {
+    return _zenstd_rt.http_get(url, headers, timeout)
+}
+
+fn post(url: string, body: any = none, headers: any = none, timeout: any = 10.0) -> map {
+    return _zenstd_rt.http_post(url, body, headers, timeout)
+}
